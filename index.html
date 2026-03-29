@@ -2,80 +2,53 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>2D Raytracing Dispersion Sandbox</title>
+    <title>128-Step Spectral Dispersion Sandbox</title>
     <style>
-        /* 1. レイアウトの固定 */
-        html, body {
-            margin: 0; padding: 0; width: 100%; height: 100%;
-            overflow: hidden; background-color: #050505; /* 暗い背景 */
-        }
-        #canvas-container {
-            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-            z-index: 1;
-        }
-        #ui-layer {
-            position: absolute; top: 20px; left: 20px; z-index: 100;
-            display: flex; gap: 15px;
-        }
+        html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #000; }
+        #canvas-container { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; }
+        #ui { position: absolute; top: 20px; left: 20px; z-index: 100; display: flex; gap: 10px; }
         button {
-            padding: 12px 24px; background: rgba(0, 0, 0, 0.5);
-            color: #0f0; border: 1px solid #0f0; cursor: pointer;
-            backdrop-filter: blur(5px); font-family: monospace; font-weight: bold;
+            padding: 10px 20px; background: #222; color: #fff; border: 1px solid #444;
+            cursor: pointer; font-family: 'Courier New', monospace; font-size: 12px;
         }
-        button:hover { background: rgba(0, 255, 0, 0.2); }
-        #debug-info {
-            position: absolute; bottom: 10px; left: 10px; color: #0f0;
-            font-family: monospace; z-index: 100; pointer-events: none;
-            background: rgba(0,0,0,0.5);
+        button:hover { background: #444; }
+        #info {
+            position: absolute; bottom: 10px; left: 10px; color: #666;
+            font-family: monospace; font-size: 10px; pointer-events: none;
         }
     </style>
 </head>
 <body>
 
-    <div id="ui-layer">
-        <button onclick="changeShape(0)">▲ Prism Shape</button>
-        <button onclick="changeShape(1)">● Metaball Shape</button>
+    <div id="ui">
+        <button onclick="setShape(0)">PRISM (1/3 Scale)</button>
+        <button onclick="setShape(1)">METABALL (1/3 Scale)</button>
     </div>
-
-    <div id="debug-info">Status: Running (2D Simulation)</div>
+    <div id="info">128 Spectral Samples / Raymarching Refraction / Full Path Visualization</div>
     <div id="canvas-container"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
 
     <script>
-        const debug = document.getElementById('debug-info');
         let uniforms;
-
-        function changeShape(val) {
-            if(uniforms) uniforms.u_shapeMix.value = val;
-            debug.innerText = "Status: " + (val === 0 ? "Prism" : "Metaball") + " Active";
-        }
+        const setShape = (v) => { if(uniforms) uniforms.u_shapeMix.value = v; };
 
         window.onload = () => {
-            const container = document.getElementById('canvas-container');
             const scene = new THREE.Scene();
             const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
             const renderer = new THREE.WebGLRenderer({ antialias: true });
-            
             renderer.setSize(window.innerWidth, window.innerHeight);
-            container.appendChild(renderer.domElement);
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
 
-            // 2Dシミュレーション用のユニフォーム
             uniforms = {
                 u_time: { value: 0 },
                 u_resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
-                u_ior: { value: 1.55 },       /* ガラスの屈折率 */
-                u_dispersion: { value: 0.15 }, /* 分光強度 */
+                u_ior: { value: 1.6 },      /* 基本屈折率 */
+                u_dispersion: { value: 0.2 }, /* 分光の広がり */
                 u_shapeMix: { value: 0.0 }
             };
 
-            const vertexShader = `
-                varying vec2 vUv;
-                void main() {
-                    vUv = uv;
-                    gl_Position = vec4(position, 1.0);
-                }
-            `;
+            const vertexShader = `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position, 1.0); }`;
 
             const fragmentShader = `
                 precision highp float;
@@ -86,8 +59,9 @@
                 uniform float u_shapeMix;
                 varying vec2 vUv;
 
-                // --- 2D SDF Shapes ---
-                // 正三角形（プリズム）
+                #define SAMPLES 128
+
+                // --- 2D SDF (1/3 Scale) ---
                 float sdTriangle(vec2 p, float r) {
                     const float k = sqrt(3.0);
                     p.x = abs(p.x) - r;
@@ -96,10 +70,136 @@
                     p.x -= clamp( p.x, -2.0*r, 0.0 );
                     return -length(p)*sign(p.y);
                 }
-                // 円（メタボール）
                 float sdCircle(vec2 p, float r) { return length(p) - r; }
-                // スムーズ融合
                 float smin(float a, float b, float k) {
+                    float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+                    return mix(b, a, h) - k * h * (1.0 - h);
+                }
+
+                float map(vec2 p) {
+                    float s = sin(u_time * 0.2), c = cos(u_time * 0.2);
+                    mat2 rot = mat2(c, -s, s, c);
+                    float d1 = sdTriangle(p * rot, 0.18); // 約1/3スケール
+                    float m1 = sdCircle(p - vec2(sin(u_time)*0.2, 0), 0.12);
+                    float m2 = sdCircle(p - vec2(cos(u_time)*0.2, 0), 0.12);
+                    float d2 = smin(m1, m2, 0.15);
+                    return mix(d1, d2, u_shapeMix);
+                }
+
+                vec2 getNormal(vec2 p) {
+                    vec2 e = vec2(0.001, 0);
+                    return normalize(vec2(map(p+e.xy)-map(p-e.xy), map(p+e.yx)-map(p-e.yx)));
+                }
+
+                // 波長(0.0-1.0)をRGBに変換
+                vec3 spectrum(float t) {
+                    vec3 col = vec3(0.0);
+                    col.r = smoothstep(0.4, 0.0, t) + smoothstep(0.6, 1.0, t);
+                    col.g = smoothstep(0.0, 0.5, t) - smoothstep(0.5, 1.0, t);
+                    col.b = smoothstep(0.3, 0.7, t);
+                    // 簡易的な色相環ベースの近似
+                    return clamp(abs(mod(t*6.0+vec3(0,4,2),6.0)-3.0)-1.0, 0.0, 1.0);
+                }
+
+                // 点と線分の距離
+                float dfLine(vec2 p, vec2 a, vec2 b) {
+                    vec2 pa = p - a, ba = b - a;
+                    float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+                    return length(pa - ba * h);
+                }
+
+                void main() {
+                    vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / min(u_resolution.y, u_resolution.x);
+                    vec3 finalCol = vec3(0.0);
+                    
+                    // 光源設定
+                    vec2 ro = vec2(-0.8, 0.2 * sin(u_time * 0.5));
+                    vec2 rd = normalize(vec2(1.0, 0.0));
+
+                    // --- 128色のスペクトルループ ---
+                    for(int i = 0; i < SAMPLES; i++) {
+                        float t = float(i) / float(SAMPLES);
+                        vec3 waveCol = spectrum(t) * (2.0 / float(SAMPLES));
+                        float currentIOR = u_ior + (t - 0.5) * u_dispersion;
+
+                        // 1. 入射光の探索
+                        float dO = 0.0;
+                        for(int j=0; j<40; j++) {
+                            float dS = map(ro + rd * dO);
+                            if(dS < 0.001 || dO > 2.0) break;
+                            dO += dS;
+                        }
+
+                        if(dO < 2.0) {
+                            vec2 p_entry = ro + rd * dO;
+                            vec2 n_entry = getNormal(p_entry);
+
+                            // --- [Phase 1] 入射光の描画 ---
+                            float dLinePre = dfLine(uv, ro, p_entry);
+                            finalCol += waveCol * smoothstep(0.004, 0.0, dLinePre) * 0.1;
+
+                            // 2. 内部屈折
+                            vec2 rd_in = refract(vec3(rd, 0), vec3(n_entry, 0), 1.0/currentIOR).xy;
+                            rd_in = normalize(rd_in);
+
+                            // 内部を通過して出口を探す
+                            float dIn = 0.01;
+                            for(int j=0; j<40; j++) {
+                                float dS = -map(p_entry + rd_in * dIn); // 内部なのでSDFを反転
+                                if(dS < 0.001 || dIn > 2.0) break;
+                                dIn += dS;
+                            }
+                            vec2 p_exit = p_entry + rd_in * dIn;
+                            vec2 n_exit = getNormal(p_exit);
+
+                            // --- [Phase 2] 内部軌跡の描画 ---
+                            float dLineIn = dfLine(uv, p_entry, p_exit);
+                            finalCol += waveCol * smoothstep(0.005, 0.0, dLineIn);
+
+                            // 3. 出射屈折
+                            vec2 rd_out = refract(vec3(rd_in, 0), vec3(-n_exit, 0), currentIOR).xy;
+                            if(length(rd_out) > 0.1) {
+                                rd_out = normalize(rd_out);
+                                vec2 p_far = p_exit + rd_out * 1.5;
+
+                                // --- [Phase 3] 出射光の描画 ---
+                                float dLineOut = dfLine(uv, p_exit, p_far);
+                                finalCol += waveCol * smoothstep(0.006, 0.0, dLineOut) * 2.0;
+                            }
+                        } else {
+                            // 物体に当たらない光（直進）
+                            float dLinePass = dfLine(uv, ro, ro + rd * 2.0);
+                            finalCol += spectrum(0.5) * smoothstep(0.004, 0.0, dLinePass) * (0.1 / float(SAMPLES));
+                        }
+                    }
+
+                    // オブジェクトの輪郭
+                    float dist = map(uv);
+                    finalCol += smoothstep(0.005, 0.0, abs(dist)) * vec3(0.2);
+                    
+                    // 背景
+                    gl_FragColor = vec4(finalCol, 1.0);
+                }
+            `;
+
+            const material = new THREE.ShaderMaterial({ uniforms, vertexShader, fragmentShader });
+            scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
+
+            const animate = (time) => {
+                uniforms.u_time.value = time * 0.001;
+                renderer.render(scene, camera);
+                requestAnimationFrame(animate);
+            };
+            animate(0);
+
+            window.addEventListener('resize', () => {
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                uniforms.u_resolution.value.set(window.innerWidth, window.innerHeight);
+            });
+        };
+    </script>
+</body>
+</html>
                     float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
                     return mix(b, a, h) - k * h * (1.0 - h);
                 }
