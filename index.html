@@ -3,32 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Mobile Prism Spectrum</title>
+    <title>7-Color Sharp Prism</title>
     <style>
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        body { margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; background-color: #000; font-family: sans-serif; }
+        body { margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; background-color: #000; }
         #canvas-container { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
-        
-        /* スマホ用UI：画面下部に配置 */
-        #ui { 
-            position: absolute; bottom: 30px; left: 0; width: 100%; 
-            z-index: 100; display: flex; justify-content: center; gap: 20px;
-        }
+        #ui { position: absolute; bottom: 30px; left: 0; width: 100%; z-index: 100; display: flex; justify-content: center; gap: 20px; }
         button {
-            padding: 15px 25px; background: rgba(255, 255, 255, 0.1); 
-            color: #fff; border: 1px solid rgba(0, 255, 0, 0.5);
-            font-size: 14px; font-weight: bold; border-radius: 30px;
-            backdrop-filter: blur(10px); width: 140px;
-        }
-        button:active { background: rgba(0, 255, 0, 0.3); }
-        #guide {
-            position: absolute; top: 20px; width: 100%; text-align: center;
-            color: rgba(0, 255, 0, 0.6); font-size: 12px; z-index: 100; pointer-events: none;
+            padding: 15px 20px; background: rgba(0,0,0,0.6); color: #0f0; border: 1px solid #0f0;
+            font-size: 14px; border-radius: 10px; backdrop-filter: blur(5px); width: 130px;
         }
     </style>
 </head>
 <body>
-    <div id="guide">画面をタップして光源を移動</div>
     <div id="ui">
         <button onclick="setShape(0)">▲ PRISM</button>
         <button onclick="setShape(1)">● METABALL</button>
@@ -42,7 +29,7 @@
 
         const setShape = (v) => { if(uniforms) uniforms.u_shapeMix.value = v; };
 
-        // タッチ/マウス位置を光源に反映
+        // 光源移動（スマホ用タップ操作）
         const updateLight = (e) => {
             const x = (e.touches ? e.touches[0].clientX : e.clientX) / window.innerWidth;
             const y = (e.touches ? e.touches[0].clientY : e.clientY) / window.innerHeight;
@@ -55,31 +42,38 @@
         window.onload = () => {
             scene = new THREE.Scene();
             camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-            renderer = new THREE.WebGLRenderer({ antialias: false }); // スマホ負荷軽減のためfalse
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // 4Kスマホ等の過剰解像度を制限
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio > 2 ? 2 : window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             document.getElementById('canvas-container').appendChild(renderer.domElement);
 
             uniforms = {
                 u_time: { value: 0 },
-                u_resolution: { value: new THREE.Vector2() },
-                u_lightPos: { value: new THREE.Vector2(-0.7, 0.0) },
+                u_resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+                u_lightPos: { value: new THREE.Vector2(-0.8, 0.2) },
                 u_shapeMix: { value: 0.0 }
             };
-            uniforms.u_resolution.value.set(window.innerWidth, window.innerHeight);
 
             const vertexShader = `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position, 1.0); }`;
 
             const fragmentShader = `
-                precision mediump float; // スマホ互換性のための精度設定
+                precision mediump float;
                 uniform vec2 u_resolution;
                 uniform float u_time;
                 uniform vec2 u_lightPos;
                 uniform float u_shapeMix;
                 varying vec2 vUv;
 
-                // ループ回数を32に抑えつつ、太い線で128色の密度を擬似再現
-                #define SAMPLES 32
+                // 虹の7色（赤・橙・黄・緑・青・藍・紫）
+                vec3 get7Color(int i) {
+                    if(i == 0) return vec3(1.0, 0.0, 0.0); // 赤
+                    if(i == 1) return vec3(1.0, 0.5, 0.0); // 橙
+                    if(i == 2) return vec3(1.0, 1.0, 0.0); // 黄
+                    if(i == 3) return vec3(0.0, 1.0, 0.0); // 緑
+                    if(i == 4) return vec3(0.0, 0.0, 1.0); // 青
+                    if(i == 5) return vec3(0.3, 0.0, 0.5); // 藍
+                    return vec3(0.5, 0.0, 1.0);           // 紫
+                }
 
                 float sdTriangle(vec2 p, float r) {
                     const float k = sqrt(3.0);
@@ -96,10 +90,96 @@
                 float map(vec2 p) {
                     float s = sin(u_time * 0.4), c = cos(u_time * 0.4);
                     mat2 rot = mat2(c, -s, s, c);
-                    float d1 = sdTriangle(p * rot, 0.15); // 1/3サイズ
-                    float m1 = sdCircle(p - vec2(sin(u_time*0.5)*0.2, 0), 0.1);
-                    float m2 = sdCircle(p - vec2(cos(u_time*0.5)*0.2, 0), 0.1);
-                    return mix(d1, smin(m1, m2, 0.15), u_shapeMix);
+                    float d1 = sdTriangle(p * rot, 0.16);
+                    float m1 = sdCircle(p - vec2(sin(u_time*0.5)*0.2, 0), 0.12);
+                    float m2 = sdCircle(p - vec2(cos(u_time*0.5)*0.2, 0), 0.12);
+                    return mix(d1, smin(m1, m2, 0.12), u_shapeMix);
+                }
+
+                vec2 getNormal(vec2 p) {
+                    vec2 e = vec2(0.001, 0);
+                    return normalize(vec2(map(p+e.xy)-map(p-e.xy), map(p+e.yx)-map(p-e.yx)));
+                }
+
+                float dfLine(vec2 p, vec2 a, vec2 b) {
+                    vec2 pa = p - a, ba = b - a;
+                    return length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0));
+                }
+
+                void main() {
+                    vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / min(u_resolution.y, u_resolution.x);
+                    vec3 finalCol = vec3(0.0);
+                    
+                    vec2 ro = u_lightPos;
+                    vec2 rd = normalize(-ro); // オブジェクトへ向かう光
+
+                    // 7色のループ
+                    for(int i = 0; i < 7; i++) {
+                        vec3 waveCol = get7Color(i) * 0.6;
+                        float ior = 1.45 + float(i) * 0.03; // 波長ごとの屈折率の差
+
+                        // 1. 入射光（オブジェクトに当たるまで）
+                        float dO = 0.0;
+                        for(int j=0; j<30; j++) {
+                            float dS = map(ro + rd * dO);
+                            if(dS < 0.001 || dO > 2.0) break;
+                            dO += dS;
+                        }
+
+                        if(dO < 2.0) {
+                            vec2 p1 = ro + rd * dO;
+                            // 入射光（全色重なるので白く見える）
+                            finalCol += waveCol * smoothstep(0.003, 0.0, dfLine(uv, ro, p1)) * 0.3;
+
+                            // 2. 内部
+                            vec2 n1 = getNormal(p1);
+                            vec2 rd_in = refract(vec3(rd, 0), vec3(n1, 0), 1.0/ior).xy;
+                            if(length(rd_in) < 0.1) rd_in = reflect(rd, n1);
+
+                            float dIn = 0.01;
+                            for(int j=0; j<30; j++) {
+                                float dS = -map(p1 + rd_in * dIn);
+                                if(dS < 0.001 || dIn > 1.0) break;
+                                dIn += dS;
+                            }
+                            vec2 p2 = p1 + rd_in * dIn;
+                            // 内部パス（細い線）
+                            finalCol += waveCol * smoothstep(0.003, 0.0, dfLine(uv, p1, p2));
+
+                            // 3. 出射光
+                            vec2 n2 = getNormal(p2);
+                            vec2 rd_out = refract(vec3(rd_in, 0), vec3(-n2, 0), ior).xy;
+                            if(length(rd_out) > 0.1) {
+                                rd_out = normalize(rd_out);
+                                finalCol += waveCol * smoothstep(0.004, 0.0, dfLine(uv, p2, p2 + rd_out * 1.5)) * 1.5;
+                            }
+                        }
+                    }
+                    
+                    // 形状の輪郭（うっすら）
+                    finalCol += smoothstep(0.003, 0.0, abs(map(uv))) * 0.2;
+                    gl_FragColor = vec4(finalCol, 1.0);
+                }
+            `;
+
+            const material = new THREE.ShaderMaterial({ uniforms, vertexShader, fragmentShader });
+            scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
+
+            function animate(time) {
+                uniforms.u_time.value = time * 0.001;
+                renderer.render(scene, camera);
+                requestAnimationFrame(animate);
+            }
+            animate(0);
+
+            window.addEventListener('resize', () => {
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                uniforms.u_resolution.value.set(window.innerWidth, window.innerHeight);
+            });
+        };
+    </script>
+</body>
+</html>
                 }
 
                 vec2 getNormal(vec2 p) {
