@@ -3,58 +3,45 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Master Prism - Final Production Edition</title>
+    <title>Fixed Spectrum Prism</title>
     <style>
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        body { margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; background-color: #050505; color: #0f0; font-family: 'Courier New', monospace; font-size: 14px; }
+        body { margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; background-color: #000; font-family: sans-serif; }
         #canvas-container { position: fixed; top: 0; left: 0; width: 100%; height: 100%; }
-        
-        /* UI Layer */
-        #ui { position: absolute; bottom: 30px; left: 0; width: 100%; z-index: 100; display: flex; flex-direction: column; align-items: center; gap: 15px; }
-        .slider-box { width: 80%; max-width: 300px; display: flex; align-items: center; gap: 10px; }
-        input[type=range] { flex-grow: 1; accent-color: #0f0; cursor: pointer; }
-        
-        #stats { position: absolute; top: 20px; left: 20px; z-index: 100; pointer-events: none; }
-        .value-label { font-size: 1.2rem; font-weight: bold; text-shadow: 0 0 10px #0f0; }
-        button { padding: 10px 15px; background: rgba(0,0,0,0.8); color: #0f0; border: 1px solid #0f0; border-radius: 4px; font-size: 12px; }
+        #ui { position: absolute; bottom: 30px; width: 100%; z-index: 100; display: flex; flex-direction: column; align-items: center; gap: 15px; }
+        .slider-box { width: 80%; max-width: 300px; display: flex; color: #0f0; gap: 10px; font-family: monospace; }
+        input[type=range] { flex-grow: 1; accent-color: #0f0; }
+        button { padding: 12px 20px; background: #111; color: #0f0; border: 1px solid #0f0; border-radius: 5px; font-weight: bold; }
+        #stats { position: absolute; top: 20px; left: 20px; color: #0f0; font-family: monospace; z-index: 100; pointer-events: none; }
     </style>
 </head>
 <body>
-    <div id="stats">
-        IOR: <span id="ior-val" class="value-label">1.45</span><br>
-        <small>PHYSICS-BASED DISPERSION ACTIVE</small>
-    </div>
-
+    <div id="stats">IOR: <span id="ior-val">1.45</span></div>
     <div id="ui">
-        <div class="slider-box">
-            <span>IOR</span>
-            <input type="range" id="ior-slider" min="1.0" max="2.5" step="0.01" value="1.45">
-        </div>
-        <button onclick="toggleShape()">▲ SHAPE</button>
+        <div class="slider-box"><span>IOR</span><input type="range" id="ior-slider" min="1.0" max="2.5" step="0.01" value="1.45"></div>
+        <button onclick="toggleShape()">▲ CHANGE SHAPE</button>
     </div>
     <div id="canvas-container"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
 
     <script>
-        let uniforms, renderer, scene, camera, material;
-        let shapeMode = 0;
+        let uniforms, shapeMode = 0;
 
         function toggleShape() {
             shapeMode = 1 - shapeMode;
             uniforms.u_shapeMix.value = shapeMode;
-            // メタボール切り替え時にランダムシードを更新
-            if(shapeMode === 1) uniforms.u_noiseSeed.value = Math.random() * 100.0;
+            if(shapeMode === 1) uniforms.u_seed.value = Math.random() * 10.0;
         }
 
         const iorSlider = document.getElementById('ior-slider');
-        const iorVal = document.getElementById('ior-val');
         iorSlider.addEventListener('input', (e) => {
-            const val = parseFloat(e.target.value);
-            uniforms.u_ior.value = val;
-            iorVal.innerText = val.toFixed(2);
+            const v = parseFloat(e.target.value);
+            uniforms.u_ior.value = v;
+            document.getElementById('ior-val').innerText = v.toFixed(2);
         });
 
+        // スワイプで方向制御
         const handleMove = (e) => {
             const x = (e.touches ? e.touches[0].clientX : e.clientX) / window.innerWidth;
             const y = (e.touches ? e.touches[0].clientY : e.clientY) / window.innerHeight;
@@ -65,41 +52,170 @@
         window.addEventListener('touchmove', handleMove);
 
         window.onload = () => {
-            scene = new THREE.Scene();
-            camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-            renderer.setPixelRatio(1); // 根本的最適化のためDPIを1に固定
+            const renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(1); // 負荷軽減
             renderer.setSize(window.innerWidth, window.innerHeight);
             document.getElementById('canvas-container').appendChild(renderer.domElement);
 
             uniforms = {
                 u_time: { value: 0 },
                 u_resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
-                u_lightDir: { value: new THREE.Vector2(0.0, -1.0) }, // デフォルト：真下
+                u_lightDir: { value: new THREE.Vector2(0.0, -1.0) },
                 u_ior: { value: 1.45 },
                 u_shapeMix: { value: 0.0 },
-                u_noiseSeed: { value: Math.random() * 100.0 }
+                u_seed: { value: Math.random() }
             };
 
-            const vertexShader = `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position, 1.0); }`;
-
             const fragmentShader = `
-                precision highp float; // 精度確保
+                precision mediump float;
                 uniform vec2 u_resolution;
                 uniform float u_time;
                 uniform vec2 u_lightDir;
                 uniform float u_ior;
                 uniform float u_shapeMix;
-                uniform float u_noiseSeed;
-                varying vec2 vUv;
+                uniform float u_seed;
 
-                #define SAMPLES 7 // 7色
-                #define EPS 0.001
-                #define MAX_DIST 4.0
-                #define BEAM_W 0.0015 // 鋭い光線の幅
+                #define BEAM_W 0.0015
 
-                // 虹の7色（赤・橙・黄・緑・青・藍・紫）
+                // --- Helper Functions (MUST BE BEFORE main) ---
+                float hash(float n) { return fract(sin(n) * 43758.5453); }
+                
+                float sdRoundedTriangle(vec2 p, float r, float f) {
+                    const float k = sqrt(3.0);
+                    p.x = abs(p.x) - r; p.y = p.y + r/k;
+                    if( p.x+k*p.y>0.0 ) p = vec2(p.x-k*p.y,-k*p.x-p.y)/2.0;
+                    p.x -= clamp( p.x, -2.0*r, 0.0 );
+                    return -length(p)*sign(p.y) - f;
+                }
+
+                float smin(float a, float b, float k) {
+                    float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+                    return mix(b, a, h) - k * h * (1.0 - h);
+                }
+
+                float sdMetaballs(vec2 p) {
+                    float d = length(p) - 0.2; // Spine
+                    for(int i=0; i<5; i++) {
+                        float fi = float(i);
+                        vec2 pos = vec2(hash(fi+u_seed)-0.5, hash(fi*1.2+u_seed)-0.5) * 0.6;
+                        d = smin(d, length(p - pos) - (0.05 + hash(fi*1.5)*0.1), 0.2);
+                    }
+                    d += (hash(p.x*10.0+p.y*10.0+u_seed)-0.5) * 0.01; // Surface Noise
+                    return d;
+                }
+
+                float map(vec2 p) {
+                    float d1 = sdRoundedTriangle(p, 0.45, 0.05); // Centered Prism
+                    float d2 = sdMetaballs(p);
+                    return mix(d1, d2, u_shapeMix);
+                }
+
+                vec2 getNormal(vec2 p) {
+                    vec2 e = vec2(0.005, 0);
+                    return normalize(vec2(map(p+e.xy)-map(p-e.xy), map(p+e.yx)-map(p-e.yx)));
+                }
+
+                float dfLine(vec2 p, vec2 a, vec2 b) {
+                    vec2 pa = p - a, ba = b - a;
+                    return length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0));
+                }
+
                 vec3 get7Color(int i) {
+                    if(i == 0) return vec3(1,0,0); if(i == 1) return vec3(1,0.5,0);
+                    if(i == 2) return vec3(1,1,0); if(i == 3) return vec3(0,1,0);
+                    if(i == 4) return vec3(0,0.5,1); if(i == 5) return vec3(0,0,1);
+                    return vec3(0.5,0,1);
+                }
+
+                void main() {
+                    vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / min(u_resolution.y, u_resolution.x);
+                    vec3 col = vec3(0.01); // 動作確認用の微かな背景
+
+                    vec2 rd = normalize(u_lightDir);
+                    vec2 ro = rd * -1.2;
+
+                    // 1. 入射
+                    float t = 0.0;
+                    for(int j=0; j<24; j++) {
+                        float d = map(ro + rd * t);
+                        if(d < 0.001 || t > 2.5) break;
+                        t += d;
+                    }
+
+                    if(t < 2.5) {
+                        vec2 p1 = ro + rd * t;
+                        vec2 n1 = getNormal(p1);
+                        col += vec3(smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, ro, p1)) * 0.5);
+
+                        // 2. 7色分光 & 線形補間
+                        for(int i=0; i<7; i++) {
+                            vec3 c1 = get7Color(i);
+                            vec3 c2 = get7Color(min(i+1, 6));
+                            float ior1 = u_ior + (float(i)/7.0 - 0.5) * 0.3;
+                            float ior2 = u_ior + (float(i+1)/7.0 - 0.5) * 0.3;
+
+                            vec2 rd_in1 = refract(rd, n1, 1.0/ior1);
+                            vec2 rd_in2 = refract(rd, n1, 1.0/ior2);
+                            if(length(rd_in1)<0.1) rd_in1 = reflect(rd, n1);
+                            if(length(rd_in2)<0.1) rd_in2 = reflect(rd, n1);
+
+                            // 出口探索 (高速化のためステップ短縮)
+                            float tE1=0.02, tE2=0.02;
+                            for(int j=0; j<12; j++) {
+                                tE1 -= map(p1 + rd_in1 * tE1);
+                                tE2 -= map(p1 + rd_in2 * tE2);
+                            }
+                            vec2 p2_1 = p1 + rd_in1 * tE1;
+                            vec2 p2_2 = p1 + rd_in2 * tE2;
+
+                            // 内部パス
+                            col += c1 * smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, p1, p2_1));
+
+                            // 出射
+                            vec2 n2_1 = getNormal(p2_1);
+                            vec2 n2_2 = getNormal(p2_2);
+                            vec2 rO1 = refract(rd_in1, -n2_1, ior1);
+                            vec2 rO2 = refract(rd_in2, -n2_2, ior2);
+
+                            if(length(rO1)>0.1 && length(rO2)>0.1) {
+                                float dL1 = dfLine(uv, p2_1, p2_1 + rO1*2.0);
+                                float dL2 = dfLine(uv, p2_2, p2_2 + rO2*2.0);
+                                
+                                // 線形補間塗りつぶし & 角度減衰
+                                float spread = length(rO1 - rO2);
+                                float atten = 1.0 / (1.0 + spread * 20.0);
+                                float fill = smoothstep(BEAM_W*2.0, 0.0, min(dL1, dL2));
+                                col += mix(c1, c2, 0.5) * fill * atten;
+                            }
+                        }
+                    } else {
+                        col += vec3(smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, ro, ro + rd * 3.0)) * 0.2);
+                    }
+
+                    col += smoothstep(0.003, 0.0, abs(map(uv))) * 0.2; // 輪郭
+                    gl_FragColor = vec4(col, 1.0);
+                }
+            `;
+
+            const scene = new THREE.Scene();
+            const material = new THREE.ShaderMaterial({ uniforms, vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position, 1.0); }`, fragmentShader });
+            scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
+
+            function animate(time) {
+                uniforms.u_time.value = time * 0.001;
+                renderer.render(scene, camera);
+                requestAnimationFrame(animate);
+            }
+            animate(0);
+
+            window.addEventListener('resize', () => {
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                uniforms.u_resolution.value.set(window.innerWidth, window.innerHeight);
+            });
+        };
+    </script>
+</body>
+</html>
                     if(i == 0) return vec3(1.0, 0.1, 0.1); // 赤
                     if(i == 1) return vec3(1.0, 0.5, 0.0); // 橙
                     if(i == 2) return vec3(1.0, 1.0, 0.1); // 黄
