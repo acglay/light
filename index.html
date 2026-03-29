@@ -3,17 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Ozzy TA Edition - Prism v6</title>
+    <title>Ozzy TA Edition - Prism v6.1</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-        body { width: 100vw; height: 100vh; overflow: hidden; background-color: #020202; font-family: monospace; }
+        body { width: 100vw; height: 100vh; overflow: hidden; background-color: #010101; font-family: monospace; }
         canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; display: block; }
         #ui { position: absolute; bottom: 25px; left: 0; width: 100%; z-index: 10; display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; }
         .slider-box { width: 85%; max-width: 320px; display: flex; color: #0f0; gap: 10px; align-items: center; background: rgba(0,0,0,0.85); padding: 8px 12px; border-radius: 10px; border: 1px solid #0f0; pointer-events: auto; }
         .slider-box span { min-width: 60px; font-size: 10px; font-weight: bold; }
         input[type=range] { flex-grow: 1; accent-color: #0f0; cursor: pointer; }
         .btns { display: flex; gap: 6px; pointer-events: auto; }
-        button { padding: 8px 12px; background: #000; color: #0f0; border: 1px solid #0f0; border-radius: 4px; font-weight: bold; font-size: 10px; font-family: inherit; }
+        button { padding: 10px 14px; background: #000; color: #0f0; border: 1px solid #0f0; border-radius: 4px; font-weight: bold; font-size: 10px; font-family: inherit; }
         #stats { position: absolute; top: 20px; left: 20px; color: #0f0; font-size: 12px; font-weight: bold; z-index: 10; pointer-events: none; text-shadow: 0 0 5px #000; line-height: 1.6; }
     </style>
 </head>
@@ -53,7 +53,9 @@
             uniforms.u_shapeMix.value = 0.0; uniforms.u_ior.value = 1.45;
             uniforms.u_colorCount.value = 3; uniforms.u_maxBounces.value = 3;
             uniforms.u_rayOrigin.value.set(0, 1.5); uniforms.u_rayDir.value.set(0, -1);
-            document.querySelectorAll('input').forEach(i => i.value = i.defaultValue);
+            document.getElementById('bounce-s').value = 3;
+            document.getElementById('rays-s').value = 3;
+            document.getElementById('ior-s').value = 1.45;
             ['v-ior','v-bounce','v-rays'].forEach((id,idx)=>(document.getElementById(id).innerText = [1.45,3,3][idx]));
         }
 
@@ -61,17 +63,14 @@
             document.getElementById(id).addEventListener('input', (e) => {
                 const v = parseFloat(e.target.value);
                 uniforms[target].value = v;
-                document.getElementById('v-'+id.split('-')[0]).innerText = v + (id==='ior-s'?'':'');
-                if(id==='ior-s') document.getElementById('v-ior').innerText = v.toFixed(2);
+                document.getElementById('v-'+id.split('-')[0]).innerText = (id==='ior-s'? v.toFixed(2) : v);
             });
         };
         setupInput('ior-s', 'u_ior'); setupInput('bounce-s', 'u_maxBounces'); setupInput('rays-s', 'u_colorCount');
 
         const toWorld = (x, y) => {
             const aspect = window.innerWidth / window.innerHeight;
-            const px = (x / window.innerWidth * 2 - 1) * (aspect > 1 ? aspect : 1);
-            const py = (1 - y / window.innerHeight * 2) / (aspect > 1 ? 1 : aspect);
-            return new THREE.Vector2(px, py);
+            return new THREE.Vector2((x / window.innerWidth * 2 - 1) * (aspect > 1 ? aspect : 1), (1 - y / window.innerHeight * 2) / (aspect > 1 ? 1 : aspect));
         };
 
         window.addEventListener('touchstart', (e) => {
@@ -83,7 +82,7 @@
             if (e.target.closest('#ui')) return;
             const endPoint = toWorld(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
             const dir = new THREE.Vector2().subVectors(endPoint, startPoint);
-            if(dir.length() > 0.05) {
+            if(dir.length() > 0.02) {
                 uniforms.u_rayOrigin.value.copy(startPoint);
                 uniforms.u_rayDir.value.copy(dir.normalize());
             }
@@ -92,7 +91,7 @@
         window.onload = () => {
             const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(window.devicePixelRatio * 1.5); // 強力なAA
+            renderer.setPixelRatio(window.devicePixelRatio); // 強力なAA
             document.body.appendChild(renderer.domElement);
 
             uniforms = {
@@ -100,6 +99,150 @@
                 u_rayOrigin: { value: new THREE.Vector2(0, 1.5) },
                 u_rayDir: { value: new THREE.Vector2(0, -1) },
                 u_ior: { value: 1.45 },
+                u_colorCount: { value: 3 },
+                u_maxBounces: { value: 3 },
+                u_shapeMix: { value: 0.0 },
+                u_angle: { value: 0.0 },
+                u_seed: { value: 42.0 }
+            };
+
+            const fragmentShader = `
+                precision highp float;
+                uniform vec2 u_resolution, u_rayOrigin, u_rayDir;
+                uniform float u_ior, u_colorCount, u_maxBounces, u_shapeMix, u_angle, u_seed;
+
+                #define EPS 0.002
+                #define BEAM_W 0.001
+
+                float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9, 78.2))) * 43758.5); }
+                float smin(float a, float b, float k) {
+                    float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+                    return mix(b, a, h) - k * h * (1.0 - h);
+                }
+
+                float sdRoundedTriangle(vec2 p, float r, float f) {
+                    const float k = sqrt(3.0);
+                    p.x = abs(p.x) - r; p.y = p.y + r/k;
+                    if( p.x+k*p.y>0.0 ) p = vec2(p.x-k*p.y,-k*p.x-p.y)/2.0;
+                    p.x -= clamp( p.x, -2.0*r, 0.0 );
+                    return -length(p)*sign(p.y) - f;
+                }
+
+                float map(vec2 p) {
+                    float s = sin(u_angle), c = cos(u_angle); mat2 rot = mat2(c, -s, s, c);
+                    float d1 = sdRoundedTriangle(p * rot, 0.375, 0.03);
+                    float d2 = length(p * rot) - 0.2;
+                    for(int i=0; i<3; i++) {
+                        float fi = float(i);
+                        vec2 seedPos = vec2(hash(vec2(fi, u_seed))-0.5, hash(vec2(fi*1.4, u_seed+fi))-0.5) * 0.7;
+                        d2 = smin(d2, length(p * rot - seedPos) - (0.05 + hash(vec2(fi*1.7))*0.1), 0.35);
+                    }
+                    return mix(d1, d2, u_shapeMix);
+                }
+
+                vec2 getNormal(vec2 p) {
+                    vec2 e = vec2(EPS, 0);
+                    return normalize(vec2(map(p+e.xy)-map(p-e.xy), map(p+e.yx)-map(p-e.yx)));
+                }
+
+                float dfLine(vec2 p, vec2 a, vec2 b) {
+                    vec2 pa = p - a, ba = b - a;
+                    return length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0));
+                }
+
+                vec3 getOzzyColor(int i, float total) {
+                    if(total <= 3.0) {
+                        if(i==0) return vec3(1,0,0); if(i==1) return vec3(0,1,0); return vec3(0,0,1);
+                    }
+                    if(total <= 5.0) {
+                        if(i==0) return vec3(1,0,0); if(i==1) return vec3(1,1,0); 
+                        if(i==2) return vec3(0,1,0); if(i==3) return vec3(0,1,1); return vec3(0,0,1);
+                    }
+                    if(total <= 7.0) {
+                        if(i==0) return vec3(1,0,0); if(i==1) return vec3(1,0.5,0); if(i==2) return vec3(1,1,0);
+                        if(i==3) return vec3(0,1,0); if(i==4) return vec3(0,0,1); if(i==5) return vec3(0.3,0,0.5); return vec3(0.5,0,1);
+                    }
+                    float f = float(i)/(total-1.0);
+                    return 0.5 + 0.5 * cos(6.28318 * (vec3(1,1,1) * f + vec3(0.0, 0.33, 0.67)));
+                }
+
+                void main() {
+                    vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / min(u_resolution.y, u_resolution.x);
+                    vec3 col = vec3(0.0);
+                    vec2 rd = u_rayDir, ro = u_rayOrigin;
+
+                    // ガラス塗りつぶし（ラインなし）
+                    float dist = map(uv);
+                    if(dist < 0.0) col += vec3(0.05, 0.1, 0.12);
+
+                    // 入射
+                    float t = 0.0;
+                    for(int j=0; j<24; j++) {
+                        float d = map(ro + rd * t);
+                        if(d < EPS || t > 3.0) break;
+                        t += d;
+                    }
+
+                    if(t < 3.0) {
+                        vec2 pInc = ro + rd * t;
+                        vec2 nInc = getNormal(pInc);
+                        col += vec3(smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, ro, pInc)) * 0.3);
+
+                        int count = int(u_colorCount);
+                        for(int i=0; i<12; i++) {
+                            if(i >= count) break;
+                            vec3 waveCol = getOzzyColor(i, u_colorCount);
+                            float curIOR = u_ior + (float(i)/max(1.0, u_colorCount-1.0) - 0.5) * 0.35;
+                            
+                            vec2 rayP = pInc, rayD = refract(rd, nInc, 1.0/curIOR);
+                            if(length(rayD) < 0.1) rayD = reflect(rd, nInc);
+
+                            for(int b=0; b < 10; b++) {
+                                if(float(b) >= u_maxBounces) break;
+                                float tExit = 0.05;
+                                for(int s=0; s<10; s++) { // 反射内ステップを削減して高速化
+                                    float d = -map(rayP + rayD * tExit);
+                                    if(d < EPS || tExit > 2.0) break;
+                                    tExit += d;
+                                }
+                                vec2 pExit = rayP + rayD * tExit;
+                                vec2 nExit = getNormal(pExit);
+                                col += waveCol * smoothstep(BEAM_W+0.001, BEAM_W, dfLine(uv, rayP, pExit)) * 0.25;
+                                
+                                vec2 rdOut = refract(rayD, -nExit, curIOR);
+                                if(length(rdOut) < 0.1) {
+                                    rayD = reflect(rayD, -nExit); rayP = pExit;
+                                } else {
+                                    col += waveCol * smoothstep(BEAM_W+0.001, BEAM_W, dfLine(uv, pExit, pExit + rdOut * 3.0));
+                                    break;
+                                }
+                            }
+                        }
+                    } else {
+                        col += vec3(smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, ro, ro + rd * 4.0)) * 0.1);
+                    }
+                    gl_FragColor = vec4(col, 1.0);
+                }
+            `;
+
+            const scene = new THREE.Scene();
+            scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({ uniforms, vertexShader: `void main(){gl_Position=vec4(position,1.0);}`, fragmentShader })));
+            const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+            function animate() {
+                if(isRotating) accumAngle += 0.012;
+                uniforms.u_angle.value = accumAngle;
+                renderer.render(scene, camera);
+                requestAnimationFrame(animate);
+            }
+            animate();
+            window.addEventListener('resize', () => {
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                uniforms.u_resolution.value.set(window.innerWidth, window.innerHeight);
+            });
+        };
+    </script>
+</body>
+</html>
                 u_colorCount: { value: 3 },
                 u_maxBounces: { value: 3 },
                 u_shapeMix: { value: 0.0 },
