@@ -3,39 +3,44 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Master Prism Final - Fixed & Optimized</title>
+    <title>Master Prism - Final Production</title>
     <style>
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body { margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; background-color: #000; font-family: monospace; }
-        canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; display: block; z-index: 1; }
-        #ui { position: absolute; bottom: 30px; left: 0; width: 100%; z-index: 100; display: flex; flex-direction: column; align-items: center; gap: 12px; }
-        .slider-box { width: 85%; max-width: 320px; display: flex; color: #0f0; gap: 10px; align-items: center; background: rgba(0,0,0,0.6); padding: 8px 15px; border-radius: 20px; border: 1px solid #0f0; }
+        
+        /* キャンバスを背面に完全固定 */
+        canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; display: block; }
+        
+        /* UIレイヤー：操作を邪魔しないように設定 */
+        #ui-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; padding-bottom: 40px; }
+        
+        #ui-box { pointer-events: auto; display: flex; flex-direction: column; align-items: center; gap: 15px; width: 90%; max-width: 350px; }
+        .slider-box { width: 100%; display: flex; color: #0f0; gap: 10px; align-items: center; background: rgba(0,0,0,0.7); padding: 12px; border-radius: 15px; border: 1px solid #0f0; }
         input[type=range] { flex-grow: 1; accent-color: #0f0; cursor: pointer; }
-        .btns { display: flex; gap: 10px; }
-        button { padding: 12px 20px; background: rgba(0,0,0,0.8); color: #0f0; border: 1px solid #0f0; border-radius: 8px; font-weight: bold; font-family: monospace; }
+        button { padding: 12px 20px; background: rgba(0,0,0,0.8); color: #0f0; border: 1px solid #0f0; border-radius: 8px; font-weight: bold; pointer-events: auto; }
+        
         #stats { position: absolute; top: 20px; left: 20px; color: #0f0; font-size: 1.1rem; font-weight: bold; text-shadow: 0 0 8px #0f0; z-index: 100; pointer-events: none; }
     </style>
 </head>
 <body>
     <div id="stats">IOR: <span id="ior-val">1.45</span></div>
-    <div id="ui">
-        <div class="slider-box"><span>IOR</span><input type="range" id="ior-slider" min="1.0" max="2.5" step="0.01" value="1.45"></div>
-        <div class="btns">
-            <button onclick="toggleShape()">▲ SHAPE</button>
-            <button onclick="toggleRotate()">🔄 ROTATION</button>
+    
+    <div id="ui-container">
+        <div id="ui-box">
+            <div class="slider-box"><span>IOR</span><input type="range" id="ior-slider" min="1.0" max="2.5" step="0.01" value="1.45"></div>
+            <button onclick="toggleShape()">▲ CHANGE SHAPE</button>
         </div>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
     <script>
-        let uniforms, shapeMode = 0, isRotating = true;
+        let uniforms, shapeMode = 0;
 
-        function toggleRotate() { isRotating = !isRotating; uniforms.u_isRotating.value = isRotating ? 1.0 : 0.0; }
         function toggleShape() {
             shapeMode = 1 - shapeMode;
             uniforms.u_shapeMix.value = shapeMode;
-            uniforms.u_seed.value = Math.random() * 100.0;
+            if(shapeMode === 1) uniforms.u_seed.value = Math.random() * 100.0;
         }
 
         const iorSlider = document.getElementById('ior-slider');
@@ -48,6 +53,7 @@
         const handleMove = (e) => {
             const x = (e.touches ? e.touches[0].clientX : e.clientX) / window.innerWidth;
             const y = (e.touches ? e.touches[0].clientY : e.clientY) / window.innerHeight;
+            // 指の方向に光を飛ばす
             const dir = new THREE.Vector2((x - 0.5) * 2.0, (0.5 - y) * 2.0).normalize();
             if(uniforms) uniforms.u_lightDir.value.copy(dir);
         };
@@ -57,17 +63,16 @@
 
         window.onload = () => {
             const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-            renderer.setPixelRatio(1); 
+            renderer.setPixelRatio(1); // モバイル最適化
             renderer.setSize(window.innerWidth, window.innerHeight);
             document.body.appendChild(renderer.domElement);
 
             uniforms = {
                 u_time: { value: 0 },
                 u_resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
-                u_lightDir: { value: new THREE.Vector2(0.0, -1.0) }, 
+                u_lightDir: { value: new THREE.Vector2(0.0, -1.0) }, // デフォルト：真下
                 u_ior: { value: 1.45 },
                 u_shapeMix: { value: 0.0 },
-                u_isRotating: { value: 1.0 },
                 u_seed: { value: Math.random() * 10.0 }
             };
 
@@ -78,7 +83,6 @@
                 uniform vec2 u_lightDir;
                 uniform float u_ior;
                 uniform float u_shapeMix;
-                uniform float u_isRotating;
                 uniform float u_seed;
 
                 #define BEAM_W 0.001
@@ -106,16 +110,13 @@
                         vec2 off = vec2(hash(fi+u_seed)-0.5, hash(fi*1.7+u_seed)-0.5) * 0.7;
                         d = smin(d, length(p - off) - (0.05 + hash(fi*2.1)*0.1), 0.25);
                     }
-                    d += (hash(p.x*20.0 + p.y*20.0 + u_seed) - 0.5) * 0.015;
+                    d += (hash(p.x*20.0 + p.y*20.0 + u_seed) - 0.5) * 0.02; 
                     return d;
                 }
 
                 float map(vec2 p) {
-                    float t = u_time * u_isRotating;
-                    float s = sin(t*0.4), c = cos(t*0.4);
-                    mat2 rot = mat2(c, -s, s, c);
-                    float d1 = sdRoundedTriangle(p * rot, 0.5, 0.04); 
-                    float d2 = sdMetaballs(p * rot);
+                    float d1 = sdRoundedTriangle(p, 0.5, 0.04); // 3倍・中央
+                    float d2 = sdMetaballs(p);
                     return mix(d1, d2, u_shapeMix);
                 }
 
@@ -139,9 +140,11 @@
                 void main() {
                     vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / min(u_resolution.y, u_resolution.x);
                     vec3 col = vec3(0.0);
+
                     vec2 rd = normalize(u_lightDir);
                     vec2 ro = rd * -1.5;
 
+                    // 1. 入射
                     float t = 0.0;
                     for(int j=0; j<32; j++) {
                         float d = map(ro + rd * t);
@@ -154,15 +157,21 @@
                         vec2 n1 = getNormal(p1);
                         col += vec3(smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, ro, p1)) * 0.4);
 
-                        // 中央波長で出口を1回だけ特定 (高速化の鍵)
+                        // 2. 出口 (中央波長で1回のみ)
                         vec2 rd_in_mid = refract(rd, n1, 1.0/u_ior);
                         if(length(rd_in_mid)<0.1) rd_in_mid = reflect(rd, n1);
                         float tE = 0.05;
-                        for(int j=0; j<24; j++) tE -= map(p1 + rd_in_mid * tE);
+                        for(int j=0; j<24; j++) {
+                            float d = -map(p1 + rd_in_mid * tE);
+                            if(d < EPS || tE > 2.0) break;
+                            tE += d;
+                        }
                         vec2 p2 = p1 + rd_in_mid * tE;
                         vec2 n2 = getNormal(p2);
 
+                        // 3. 7色の分光 & 塗りつぶし
                         vec2 last_rd_out = vec2(0);
+
                         for(int i=0; i<7; i++) {
                             float f = float(i)/6.0;
                             float cur_ior = u_ior + (f - 0.5) * 0.35;
@@ -173,21 +182,23 @@
                             if(length(rd_out) < 0.1) rd_out = reflect(rd_in, -n2);
                             rd_out = normalize(rd_out);
 
-                            float dL = dfLine(uv, p2, p2 + rd_out * 2.0);
-                            col += c1 * smoothstep(BEAM_W+0.001, BEAM_W, dL);
+                            // 光線
+                            col += c1 * smoothstep(BEAM_W+0.001, BEAM_W, dfLine(uv, p2, p2 + rd_out * 2.0));
 
-                            // 角度ベースの塗りつぶし
+                            // 塗りつぶし (角度ベース)
                             if(i > 0) {
                                 vec3 c_prev = get7Color(i-1);
                                 float a_uv = atan(uv.y - p2.y, uv.x - p2.x);
                                 float a1 = atan(last_rd_out.y, last_rd_out.x);
                                 float a2 = atan(rd_out.y, rd_out.x);
+                                
                                 if(a2 < a1) a2 += 6.28318;
                                 if(a_uv < a1) a_uv += 6.28318;
-                                if(a_uv > a1 && a_uv < a2 && length(uv-p2) > 0.015) {
+
+                                if(a_uv > a1 && a_uv < a2 && length(uv-p2) > 0.01) {
                                     float spread = abs(a2 - a1);
                                     float energy = 1.0 / (1.0 + spread * 50.0);
-                                    col += mix(c_prev, c1, (a_uv-a1)/spread) * 0.7 * energy;
+                                    col += mix(c_prev, c1, (a_uv-a1)/spread) * 0.6 * energy;
                                 }
                             }
                             last_rd_out = rd_out;
@@ -196,17 +207,19 @@
                     } else {
                         col += vec3(smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, ro, ro + rd * 3.0)) * 0.1);
                     }
+
                     col += smoothstep(0.003, 0.0, abs(map(uv))) * vec3(0, 1, 0.6) * 0.2;
                     gl_FragColor = vec4(col, 1.0);
                 }
             `;
 
+            const geometry = new THREE.PlaneGeometry(2, 2);
             const material = new THREE.ShaderMaterial({ uniforms, vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position, 1.0); }`, fragmentShader });
-            scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
+            scene.add(new THREE.Mesh(geometry, material));
 
             function animate(time) {
                 uniforms.u_time.value = time * 0.001;
-                renderer.render(scene, camera);
+                renderer.render(scene, new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1));
                 requestAnimationFrame(animate);
             }
             animate(0);
