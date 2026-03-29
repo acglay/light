@@ -3,16 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Master Prism Final - Ozzy Edition</title>
+    <title>Spectral Prism Pro - Final</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
         body { width: 100vw; height: 100vh; overflow: hidden; background-color: #000; font-family: monospace; }
-        canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; display: block; }
-        #ui { position: absolute; bottom: 30px; left: 0; width: 100%; z-index: 100; display: flex; flex-direction: column; align-items: center; gap: 15px; pointer-events: none; }
+        canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; display: block; }
+        #ui { position: absolute; bottom: 30px; left: 0; width: 100%; z-index: 10; display: flex; flex-direction: column; align-items: center; gap: 15px; pointer-events: none; }
         .slider-box { width: 85%; max-width: 320px; display: flex; color: #0f0; gap: 10px; align-items: center; background: rgba(0,0,0,0.8); padding: 12px; border-radius: 20px; border: 1px solid #0f0; pointer-events: auto; }
         input[type=range] { flex-grow: 1; accent-color: #0f0; cursor: pointer; }
         button { padding: 12px 24px; background: rgba(0,0,0,0.9); color: #0f0; border: 1px solid #0f0; border-radius: 8px; font-weight: bold; pointer-events: auto; }
-        #stats { position: absolute; top: 20px; left: 20px; color: #0f0; font-size: 1.1rem; font-weight: bold; z-index: 100; pointer-events: none; text-shadow: 0 0 5px #000; }
+        #stats { position: absolute; top: 20px; left: 20px; color: #0f0; font-size: 1.1rem; font-weight: bold; z-index: 10; pointer-events: none; text-shadow: 0 0 5px #000; }
     </style>
 </head>
 <body>
@@ -53,7 +53,7 @@
         window.onload = () => {
             const renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(1); // パフォーマンス優先
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
             document.body.appendChild(renderer.domElement);
 
             uniforms = {
@@ -75,15 +75,15 @@
                 uniform float u_seed;
 
                 #define BEAM_W 0.001
-                #define EPS 0.002
+                #define EPS 0.0015
                 #define SAMPLES 7
 
                 // 物理ベース7色スペクトル
                 vec3 get7Color(int i) {
-                    if(i==0) return vec3(1.0, 0.0, 0.0); if(i==1) return vec3(1.0, 0.5, 0.0);
-                    if(i==2) return vec3(1.0, 1.0, 0.0); if(i==3) return vec3(0.0, 1.0, 0.0);
-                    if(i==4) return vec3(0.0, 0.5, 1.0); if(i==5) return vec3(0.2, 0.0, 0.8);
-                    return vec3(0.5, 0.0, 1.0);
+                    if(i==0) return vec3(1.0, 0.05, 0.05); if(i==1) return vec3(1.0, 0.5, 0.0);
+                    if(i==2) return vec3(1.0, 0.9, 0.05); if(i==3) return vec3(0.1, 1.0, 0.1);
+                    if(i==4) return vec3(0.05, 0.5, 1.0); if(i==5) return vec3(0.2, 0.1, 0.8);
+                    return vec3(0.6, 0.1, 1.0);
                 }
 
                 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -100,6 +100,143 @@
                     p.x -= clamp( p.x, -2.0*r, 0.0 );
                     return -length(p)*sign(p.y) - f;
                 }
+
+                float smin(float a, float b, float k) {
+                    float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+                    return mix(b, a, h) - k * h * (1.0 - h);
+                }
+
+                float sdMetaballs(vec2 p) {
+                    float d = length(p) - 0.2;
+                    for(int i=0; i<4; i++) {
+                        float fi = float(i);
+                        vec2 off = vec2(noise(vec2(fi, u_seed))-0.5, noise(vec2(fi*1.4, u_seed+fi))-0.5) * 0.7;
+                        d = smin(d, length(p - off) - (0.05 + noise(vec2(fi*1.9, u_seed))*0.12), 0.25);
+                    }
+                    d += (noise(p * 15.0 + u_seed) - 0.5) * 0.01;
+                    return d;
+                }
+
+                float map(vec2 p) {
+                    float s = sin(u_time*0.3), c = cos(u_time*0.3);
+                    mat2 rot = mat2(c, -s, s, c);
+                    float d1 = sdRoundedTriangle(p * rot, 0.375, 0.03); // 1.5倍サイズ
+                    float d2 = sdMetaballs(p * rot);
+                    return mix(d1, d2, u_shapeMix);
+                }
+
+                vec2 getNormal(vec2 p) {
+                    vec2 e = vec2(0.002, 0);
+                    return normalize(vec2(map(p+e.xy)-map(p-e.xy), map(p+e.yx)-map(p-e.yx)));
+                }
+
+                float dfLine(vec2 p, vec2 a, vec2 b) {
+                    vec2 pa = p - a, ba = b - a;
+                    return length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0));
+                }
+
+                void main() {
+                    vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / min(u_resolution.y, u_resolution.x);
+                    vec3 col = vec3(0.0);
+                    vec2 rd = normalize(u_lightDir);
+                    vec2 ro = rd * -1.5;
+
+                    // 1. 入射点特定 (共通)
+                    float t = 0.0;
+                    for(int j=0; j<24; j++) {
+                        float d = map(ro + rd * t);
+                        if(d < EPS || t > 2.5) break;
+                        t += d;
+                    }
+
+                    if(t < 2.5) {
+                        vec2 p1 = ro + rd * t;
+                        vec2 n1 = getNormal(p1);
+                        col += vec3(smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, ro, p1)) * 0.4);
+
+                        // 高速化のため、中央の波長で一度だけ出口の"面"の法線を予測
+                        vec2 rd_in_mid = refract(rd, n1, 1.0/u_ior);
+                        if(length(rd_in_mid)<0.1) rd_in_mid = reflect(rd, n1);
+                        float tE_mid = 0.05;
+                        for(int j=0; j<16; j++) tE_mid -= map(p1 + rd_in_mid * tE_mid);
+                        vec2 n2_approx = getNormal(p1 + rd_in_mid * tE_mid);
+
+                        vec2 last_rd_out = vec2(0);
+                        vec2 last_p2 = vec2(0);
+
+                        for(int i=0; i<SAMPLES; i++) {
+                            float f = float(i)/6.0;
+                            float cur_ior = u_ior + (f - 0.5) * 0.4; // 分散
+                            vec3 c1 = get7Color(i);
+                            
+                            // [1st Refraction] 入口で色ごとに分光！
+                            vec2 rd_in = refract(rd, n1, 1.0/cur_ior);
+                            if(length(rd_in) < 0.1) rd_in = reflect(rd, n1);
+
+                            // [Exit Search]
+                            float tE = 0.05;
+                            for(int j=0; j<12; j++) tE -= map(p1 + rd_in * tE);
+                            vec2 p2 = p1 + rd_in * tE;
+                            vec2 n2 = getNormal(p2);
+
+                            // [2nd Refraction] 出口でさらに分光
+                            vec2 rd_out = normalize(refract(rd_in, -n2, cur_ior));
+                            if(length(rd_out) < 0.1) rd_out = reflect(rd_in, -n2);
+
+                            // 描画：内部パス
+                            col += c1 * smoothstep(BEAM_W+0.001, BEAM_W, dfLine(uv, p1, p2)) * 0.25;
+                            // 描画：出射光 (Sharp)
+                            col += c1 * smoothstep(BEAM_W+0.001, BEAM_W, dfLine(uv, p2, p2 + rd_out * 2.0));
+
+                            // [Area Fill] 隣の色との間を埋める
+                            if(i > 0) {
+                                vec3 c_prev = get7Color(i-1);
+                                float a_uv = atan(uv.y - p2.y, uv.x - p2.x);
+                                float a1 = atan(last_rd_out.y, last_rd_out.x);
+                                float a2 = atan(rd_out.y, rd_out.x);
+                                if(a2 < a1) a2 += 6.28318;
+                                if(a_uv < a1) a_uv += 6.28318;
+
+                                if(a_uv > a1 && a_uv < a2 && length(uv-p2) > 0.02) {
+                                    float spread = abs(a2 - a1);
+                                    float energy = 1.0 / (1.0 + spread * 50.0);
+                                    col += mix(c_prev, c1, (a_uv-a1)/spread) * 0.65 * energy;
+                                }
+                            }
+                            last_rd_out = rd_out;
+                        }
+                    } else {
+                        col += vec3(smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, ro, ro + rd * 3.0)) * 0.1);
+                    }
+                    col += smoothstep(0.004, 0.0, abs(map(uv))) * vec3(0, 1, 0.8) * 0.2;
+                    gl_FragColor = vec4(col, 1.0);
+                }
+            `;
+
+            const scene = new THREE.Scene();
+            const material = new THREE.ShaderMaterial({
+                uniforms,
+                vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position, 1.0); }`,
+                fragmentShader
+            });
+            scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
+            const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+            function animate(time) {
+                uniforms.u_time.value = time * 0.001;
+                renderer.render(scene, camera);
+                requestAnimationFrame(animate);
+            }
+            animate(0);
+
+            window.addEventListener('resize', () => {
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                uniforms.u_resolution.value.set(window.innerWidth, window.innerHeight);
+            });
+        };
+    </script>
+</body>
+</html>
 
                 float smin(float a, float b, float k) {
                     float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
