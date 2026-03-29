@@ -3,22 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Multi-Bounce Prism Final</title>
+    <title>7-Color Multi-Bounce Prism</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-        body { width: 100vw; height: 100vh; overflow: hidden; background-color: #050505; font-family: monospace; }
+        body { width: 100vw; height: 100vh; overflow: hidden; background-color: #030303; font-family: 'Courier New', monospace; }
         canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; display: block; }
+        
         #ui { position: absolute; bottom: 25px; left: 0; width: 100%; z-index: 10; display: flex; flex-direction: column; align-items: center; gap: 12px; pointer-events: none; }
         .slider-box { width: 85%; max-width: 320px; display: flex; color: #0f0; gap: 10px; align-items: center; background: rgba(0,0,0,0.85); padding: 12px; border-radius: 12px; border: 1px solid #0f0; pointer-events: auto; }
         input[type=range] { flex-grow: 1; accent-color: #0f0; cursor: pointer; }
+        
         .btns { display: flex; gap: 8px; pointer-events: auto; }
-        button { padding: 10px 15px; background: #000; color: #0f0; border: 1px solid #0f0; border-radius: 6px; font-weight: bold; font-size: 11px; font-family: inherit; }
+        button { padding: 10px 14px; background: #000; color: #0f0; border: 1px solid #0f0; border-radius: 6px; font-weight: bold; font-size: 11px; font-family: inherit; cursor: pointer; }
         button:active { background: #0f0; color: #000; }
-        #stats { position: absolute; top: 20px; left: 20px; color: #0f0; font-size: 14px; font-weight: bold; z-index: 10; pointer-events: none; text-shadow: 0 0 5px #000; }
+        
+        #stats { position: absolute; top: 20px; left: 20px; color: #0f0; font-size: 13px; font-weight: bold; z-index: 10; pointer-events: none; text-shadow: 0 0 5px #000; line-height: 1.5; }
     </style>
 </head>
 <body>
-    <div id="stats">IOR: <span id="ior-val">1.45</span><br>BOUNCES: 5 MAX</div>
+    <div id="stats">
+        IOR: <span id="ior-val">1.45</span><br>
+        BOUNCES: 5 MAX<br>
+        SPECTRUM: 7 RAYS
+    </div>
+    
     <div id="ui">
         <div class="slider-box"><span>IOR</span><input type="range" id="ior-slider" min="1.0" max="2.5" step="0.01" value="1.45"></div>
         <div class="btns">
@@ -39,15 +47,19 @@
             uniforms.u_isRotating.value = isRotating ? 1.0 : 0.0;
             document.getElementById('rot-btn').innerText = isRotating ? "STOP ROTATION" : "START ROTATION";
         }
+
         function toggleShape() {
             shapeMode = 1 - shapeMode;
             uniforms.u_shapeMix.value = shapeMode;
             uniforms.u_seed.value = Math.random() * 100.0;
         }
+
         function resetAll() {
             shapeMode = 0; isRotating = true;
-            uniforms.u_shapeMix.value = 0.0; uniforms.u_isRotating.value = 1.0;
-            uniforms.u_ior.value = 1.45; uniforms.u_lightDir.value.set(0, -1);
+            uniforms.u_shapeMix.value = 0.0;
+            uniforms.u_isRotating.value = 1.0;
+            uniforms.u_ior.value = 1.45;
+            uniforms.u_lightDir.value.set(0, -1);
             document.getElementById('ior-slider').value = 1.45;
             document.getElementById('ior-val').innerText = "1.45";
             document.getElementById('rot-btn').innerText = "STOP ROTATION";
@@ -60,47 +72,30 @@
             document.getElementById('ior-val').innerText = v.toFixed(2);
         });
 
-        window.addEventListener('touchstart', (e) => { startPos.set(e.touches[0].clientX, e.touches[0].clientY); });
+        // スワイプによる方向ベクトル指定
+        window.addEventListener('touchstart', (e) => {
+            startPos.set(e.touches[0].clientX, e.touches[0].clientY);
+        }, { passive: false });
+
         window.addEventListener('touchend', (e) => {
             const endPos = new THREE.Vector2(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
-            const dir = new THREE.Vector2().subVectors(endPos, startPos);
-            if(dir.length() > 20) {
-                uniforms.u_lightDir.value.copy(dir.normalize());
-                uniforms.u_lightDir.value.y *= -1.0;
+            const delta = new THREE.Vector2().subVectors(endPos, startPos);
+            if(delta.length() > 20) {
+                const dir = delta.normalize();
+                uniforms.u_lightDir.value.set(dir.x, -dir.y); // Y反転
             }
         });
 
         window.onload = () => {
             const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(1); // クラッシュ防止
+            renderer.setPixelRatio(1); // 安定性重視
             document.body.appendChild(renderer.domElement);
 
             uniforms = {
                 u_time: { value: 0 },
                 u_resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
-                u_lightDir: { value: new THREE.Vector2(0.0, -1.0) },
-                u_ior: { value: 1.45 },
-                u_shapeMix: { value: 0.0 },
-                u_isRotating: { value: 1.0 },
-                u_seed: { value: 42.0 }
-            };
-
-            const fragmentShader = `
-                precision highp float;
-                uniform vec2 u_resolution;
-                uniform float u_time;
-                uniform vec2 u_lightDir;
-                uniform float u_ior;
-                uniform float u_shapeMix;
-                uniform float u_isRotating;
-                uniform float u_seed;
-
-                #define MAX_BOUNCES 5
-                #define BEAM_W 0.001
-                #define EPS 0.002
-
-                float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 78.2))) * 43758.5); }
+                u_                float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 78.2))) * 43758.5); }
                 float noise(vec2 p) {
                     vec2 i = floor(p), f = fract(p);
                     vec2 u = f*f*(3.0-2.0*f);
