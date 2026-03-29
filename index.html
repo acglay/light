@@ -3,16 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>7-Color Sharp Prism</title>
+    <title>Physics-Based Prism Dispersion</title>
     <style>
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        body { margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; background-color: #000; }
+        body { margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; background-color: #080808; }
         #canvas-container { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
-        #ui { position: absolute; bottom: 30px; left: 0; width: 100%; z-index: 100; display: flex; justify-content: center; gap: 20px; }
+        #ui { position: absolute; bottom: 40px; left: 0; width: 100%; z-index: 100; display: flex; justify-content: center; gap: 15px; }
         button {
-            padding: 15px 20px; background: rgba(0,0,0,0.6); color: #0f0; border: 1px solid #0f0;
-            font-size: 14px; border-radius: 10px; backdrop-filter: blur(5px); width: 130px;
+            padding: 12px 20px; background: rgba(20, 20, 20, 0.8); color: #00ffaa; border: 1px solid #00ffaa;
+            font-size: 14px; font-weight: bold; border-radius: 5px; backdrop-filter: blur(5px); min-width: 120px;
         }
+        button:active { background: #00ffaa; color: #000; }
     </style>
 </head>
 <body>
@@ -29,11 +30,11 @@
 
         const setShape = (v) => { if(uniforms) uniforms.u_shapeMix.value = v; };
 
-        // 光源移動（スマホ用タップ操作）
+        // 光源を動かす（中心付近に制限）
         const updateLight = (e) => {
             const x = (e.touches ? e.touches[0].clientX : e.clientX) / window.innerWidth;
             const y = (e.touches ? e.touches[0].clientY : e.clientY) / window.innerHeight;
-            if(uniforms) uniforms.u_lightPos.value.set((x - 0.5) * 2.0, (0.5 - y) * 2.0);
+            if(uniforms) uniforms.u_lightPos.value.set((x - 0.5) * 1.5, (0.5 - y) * 1.5);
         };
         window.addEventListener('mousemove', updateLight);
         window.addEventListener('touchstart', updateLight);
@@ -43,38 +44,43 @@
             scene = new THREE.Scene();
             camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
             renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setPixelRatio(window.devicePixelRatio > 2 ? 2 : window.devicePixelRatio);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
             renderer.setSize(window.innerWidth, window.innerHeight);
             document.getElementById('canvas-container').appendChild(renderer.domElement);
 
             uniforms = {
                 u_time: { value: 0 },
                 u_resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
-                u_lightPos: { value: new THREE.Vector2(-0.8, 0.2) },
+                u_lightPos: { value: new THREE.Vector2(-0.6, 0.3) },
                 u_shapeMix: { value: 0.0 }
             };
 
             const vertexShader = `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position, 1.0); }`;
 
             const fragmentShader = `
-                precision mediump float;
+                precision highp float;
                 uniform vec2 u_resolution;
                 uniform float u_time;
                 uniform vec2 u_lightPos;
                 uniform float u_shapeMix;
                 varying vec2 vUv;
 
-                // 虹の7色（赤・橙・黄・緑・青・藍・紫）
+                // 物理定数
+                #define EPS 0.001
+                #define MAX_DIST 4.0
+
+                // 7色のスペクトル
                 vec3 get7Color(int i) {
-                    if(i == 0) return vec3(1.0, 0.0, 0.0); // 赤
+                    if(i == 0) return vec3(1.0, 0.1, 0.1); // 赤
                     if(i == 1) return vec3(1.0, 0.5, 0.0); // 橙
-                    if(i == 2) return vec3(1.0, 1.0, 0.0); // 黄
-                    if(i == 3) return vec3(0.0, 1.0, 0.0); // 緑
-                    if(i == 4) return vec3(0.0, 0.0, 1.0); // 青
-                    if(i == 5) return vec3(0.3, 0.0, 0.5); // 藍
-                    return vec3(0.5, 0.0, 1.0);           // 紫
+                    if(i == 2) return vec3(1.0, 1.0, 0.1); // 黄
+                    if(i == 3) return vec3(0.1, 1.0, 0.1); // 緑
+                    if(i == 4) return vec3(0.1, 0.5, 1.0); // 青
+                    if(i == 5) return vec3(0.3, 0.1, 0.8); // 藍
+                    return vec3(0.6, 0.1, 1.0);           // 紫
                 }
 
+                // --- 2D SDF Shapes (1/3 Scale) ---
                 float sdTriangle(vec2 p, float r) {
                     const float k = sqrt(3.0);
                     p.x = abs(p.x) - r; p.y = p.y + r/k;
@@ -88,18 +94,120 @@
                 }
 
                 float map(vec2 p) {
-                    float s = sin(u_time * 0.4), c = cos(u_time * 0.4);
+                    float s = sin(u_time * 0.3), c = cos(u_time * 0.3);
                     mat2 rot = mat2(c, -s, s, c);
-                    float d1 = sdTriangle(p * rot, 0.16);
-                    float m1 = sdCircle(p - vec2(sin(u_time*0.5)*0.2, 0), 0.12);
-                    float m2 = sdCircle(p - vec2(cos(u_time*0.5)*0.2, 0), 0.12);
+                    float d1 = sdTriangle(p * rot, 0.15);
+                    float m1 = sdCircle(p - vec2(sin(u_time*0.5)*0.2, 0), 0.1);
+                    float m2 = sdCircle(p - vec2(cos(u_time*0.5)*0.2, 0), 0.1);
                     return mix(d1, smin(m1, m2, 0.12), u_shapeMix);
                 }
 
                 vec2 getNormal(vec2 p) {
-                    vec2 e = vec2(0.001, 0);
+                    vec2 e = vec2(EPS, 0.0);
                     return normalize(vec2(map(p+e.xy)-map(p-e.xy), map(p+e.yx)-map(p-e.yx)));
                 }
+
+                float dfLine(vec2 p, vec2 a, vec2 b) {
+                    vec2 pa = p - a, ba = b - a;
+                    return length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0));
+                }
+
+                void main() {
+                    vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / min(u_resolution.y, u_resolution.x);
+                    vec3 col = vec3(0.0);
+                    
+                    vec2 ro = u_lightPos;
+                    vec2 rd = normalize(-ro); // オブジェクトへ向かう
+
+                    for(int i = 0; i < 7; i++) {
+                        vec3 waveCol = get7Color(i);
+                        float n_air = 1.0;
+                        float n_glass = 1.45 + float(i) * 0.04; // 屈折率の差（分光）
+
+                        // 1. 入射
+                        float t1 = 0.0;
+                        for(int j=0; j<60; j++) {
+                            float d = map(ro + rd * t1);
+                            if(d < EPS || t1 > MAX_DIST) break;
+                            t1 += d;
+                        }
+
+                        if(t1 < MAX_DIST) {
+                            vec2 p1 = ro + rd * t1;
+                            vec2 normal1 = getNormal(p1);
+                            
+                            // 入射光（白く見えるように全色重ねる）
+                            col += waveCol * smoothstep(0.003, 0.0, dfLine(uv, ro, p1)) * 0.2;
+
+                            // --- 屈折 (Air -> Glass) ---
+                            vec2 rd_in = refract(rd, normal1, n_air / n_glass);
+                            
+                            if(length(rd_in) > 0.1) {
+                                // 内部を通過
+                                float t2 = 0.02;
+                                for(int j=0; j<60; j++) {
+                                    float d = -map(p1 + rd_in * t2); // 内部なので反転
+                                    if(d < EPS || t2 > MAX_DIST) break;
+                                    t2 += d;
+                                }
+                                vec2 p2 = p1 + rd_in * t2;
+                                col += waveCol * smoothstep(0.003, 0.0, dfLine(uv, p1, p2));
+
+                                // --- 屈折 (Glass -> Air) ---
+                                vec2 normal2 = getNormal(p2);
+                                vec2 rd_out = refract(rd_in, -normal2, n_glass / n_air);
+
+                                if(length(rd_out) > 0.1) {
+                                    // 正常に出射
+                                    col += waveCol * smoothstep(0.004, 0.0, dfLine(uv, p2, p2 + rd_out * 1.0)) * 2.0;
+                                } else {
+                                    // 全反射 (TIR)
+                                    vec2 rd_reflect = reflect(rd_in, -normal2);
+                                    float t3 = 0.02;
+                                    for(int j=0; j<60; j++) {
+                                        float d = -map(p2 + rd_reflect * t3);
+                                        if(d < EPS || t3 > MAX_DIST) break;
+                                        t3 += d;
+                                    }
+                                    vec2 p3 = p2 + rd_reflect * t3;
+                                    col += waveCol * smoothstep(0.003, 0.0, dfLine(uv, p2, p3));
+                                    
+                                    // 再出射
+                                    vec2 normal3 = getNormal(p3);
+                                    vec2 rd_out2 = refract(rd_reflect, -normal3, n_glass / n_air);
+                                    col += waveCol * smoothstep(0.004, 0.0, dfLine(uv, p3, p3 + rd_out2 * 1.0)) * 2.0;
+                                }
+                            }
+                        }
+                    }
+                    
+                    // オブジェクトのうっすらとした透過表現
+                    float dist = map(uv);
+                    col += smoothstep(0.002, 0.0, abs(dist)) * vec3(0.1, 0.3, 0.2);
+                    if(dist < 0.0) col += vec3(0.02, 0.03, 0.04); // 内部を少し明るく（透過）
+
+                    gl_FragColor = vec4(col, 1.0);
+                }
+            `;
+
+            const material = new THREE.ShaderMaterial({ uniforms, vertexShader, fragmentShader });
+            scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
+
+            function animate(time) {
+                uniforms.u_time.value = time * 0.001;
+                renderer.render(scene, camera);
+                requestAnimationFrame(animate);
+            }
+            animate(0);
+
+            window.addEventListener('resize', () => {
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                uniforms.u_resolution.value.set(window.innerWidth, window.innerHeight);
+            });
+        };
+    </script>
+</body>
+</html>
 
                 float dfLine(vec2 p, vec2 a, vec2 b) {
                     vec2 pa = p - a, ba = b - a;
