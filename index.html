@@ -220,3 +220,123 @@
     </script>
 </body>
 </html>
+                    return d;
+                }
+
+                float map(vec2 p) {
+                    float d1 = sdRoundedTriangle(p, 0.5, 0.04); 
+                    float d2 = sdMetaballs(p);
+                    return mix(d1, d2, u_shapeMix);
+                }
+
+                vec2 getNormal(vec2 p) {
+                    vec2 e = vec2(EPS, 0);
+                    return normalize(vec2(map(p+e.xy)-map(p-e.xy), map(p+e.yx)-map(p-e.yx)));
+                }
+
+                float dfLine(vec2 p, vec2 a, vec2 b) {
+                    vec2 pa = p - a, ba = b - a;
+                    return length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0));
+                }
+
+                vec3 get7Color(int i) {
+                    if(i==0) return vec3(1,0,0); if(i==1) return vec3(1,0.5,0);
+                    if(i==2) return vec3(1,1,0); if(i==3) return vec3(0,1,0);
+                    if(i==4) return vec3(0,0.4,1); if(i==5) return vec3(0,0,1);
+                    return vec3(0.5,0,1);
+                }
+
+                void main() {
+                    vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / min(u_resolution.y, u_resolution.x);
+                    vec3 col = vec3(0.0);
+
+                    vec2 rd = normalize(u_lightDir);
+                    vec2 ro = rd * -1.5;
+
+                    // 1. 入射点特定 (共通)
+                    float t = 0.0;
+                    for(int j=0; j<32; j++) {
+                        float d = map(ro + rd * t);
+                        if(d < EPS || t > 3.0) break;
+                        t += d;
+                    }
+
+                    if(t < 3.0) {
+                        vec2 p1 = ro + rd * t;
+                        vec2 n1 = getNormal(p1);
+                        col += vec3(smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, ro, p1)) * 0.4);
+
+                        vec2 last_rd_out = vec2(0);
+                        vec2 last_p2 = vec2(0);
+
+                        for(int i=0; i<SAMPLES; i++) {
+                            float f = float(i)/6.0;
+                            float cur_ior = u_ior + (f - 0.5) * 0.4; // 分散幅
+                            vec3 c1 = get7Color(i);
+                            
+                            // [1st Refraction] 入口での分光
+                            vec2 rd_in = refract(rd, n1, 1.0/cur_ior);
+                            if(length(rd_in) < 0.1) rd_in = reflect(rd, n1);
+
+                            // [Internal Path] 出口探索 (色ごとに個別計算)
+                            float tE = 0.05;
+                            for(int j=0; j<16; j++) {
+                                float d = -map(p1 + rd_in * tE);
+                                if(d < EPS || tE > 2.0) break;
+                                tE += d;
+                            }
+                            vec2 p2 = p1 + rd_in * tE;
+                            vec2 n2 = getNormal(p2);
+
+                            // [2nd Refraction] 出口での分光
+                            vec2 rd_out = refract(rd_in, -n2, cur_ior);
+                            if(length(rd_out) < 0.1) rd_out = reflect(rd_in, -n2);
+                            rd_out = normalize(rd_out);
+
+                            // 描画：内部
+                            col += c1 * smoothstep(BEAM_W+0.001, BEAM_W, dfLine(uv, p1, p2)) * 0.3;
+                            // 描画：出射光 (シャープな線)
+                            col += c1 * smoothstep(BEAM_W+0.001, BEAM_W, dfLine(uv, p2, p2 + rd_out * 2.0));
+
+                            // [Filling & Attenuation] 隣の色との間を補間
+                            if(i > 0) {
+                                vec3 c_prev = get7Color(i-1);
+                                // 角度ベースの塗りつぶし
+                                float a_uv = atan(uv.y - p2.y, uv.x - p2.x);
+                                float a1 = atan(last_rd_out.y, last_rd_out.x);
+                                float a2 = atan(rd_out.y, rd_out.x);
+                                if(a2 < a1) a2 += 6.28318;
+                                if(a_uv < a1) a_uv += 6.28318;
+
+                                if(a_uv > a1 && a_uv < a2 && length(uv-p2) > 0.02) {
+                                    float spread = abs(a2 - a1);
+                                    float energy = 1.0 / (1.0 + spread * 60.0); // 面積が広がるほど暗く
+                                    col += mix(c_prev, c1, (a_uv-a1)/spread) * 0.7 * energy;
+                                }
+                            }
+                            last_rd_out = rd_out;
+                            last_p2 = p2;
+                        }
+                    } else {
+                        col += vec3(smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, ro, ro + rd * 3.0)) * 0.1);
+                    }
+
+                    col += smoothstep(0.003, 0.0, abs(map(uv))) * vec3(0, 1, 0.6) * 0.2;
+                    gl_FragColor = vec4(col, 1.0);
+                }
+            `;
+
+            const scene = new THREE.Scene();
+            const material = new THREE.ShaderMaterial({ uniforms, vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position, 1.0); }`, fragmentShader });
+            scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
+
+            function animate(time) {
+                uniforms.u_time.value = time * 0.001;
+                renderer.render(scene, new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1));
+                requestAnimationFrame(animate);
+            }
+            animate(0);
+        };
+    </script>
+</body>
+</html>
