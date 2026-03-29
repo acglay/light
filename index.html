@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Spectral Prism Optimizer</title>
+    <title>Centered Prism - Swipe Control</title>
     <style>
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body { margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; background-color: #000; font-family: sans-serif; }
@@ -11,24 +11,26 @@
         
         #ui { 
             position: absolute; bottom: 30px; left: 0; width: 100%; 
-            z-index: 100; display: flex; flex-direction: column; align-items: center; gap: 10px;
+            z-index: 100; display: flex; justify-content: center; gap: 10px;
         }
-        .row { display: flex; gap: 10px; }
         button {
-            padding: 12px 18px; background: rgba(20, 20, 20, 0.85); 
-            color: #0f0; border: 1px solid #0f0;
-            font-size: 13px; font-weight: bold; border-radius: 8px;
-            backdrop-filter: blur(5px); min-width: 130px;
+            padding: 12px 20px; background: rgba(0, 255, 170, 0.1); 
+            color: #00ffaa; border: 1px solid #00ffaa;
+            font-size: 13px; font-weight: bold; border-radius: 5px;
+            backdrop-filter: blur(8px);
         }
-        button.active { background: #0f0; color: #000; }
+        #guide {
+            position: absolute; top: 20px; width: 100%; text-align: center;
+            color: rgba(0, 255, 170, 0.6); font-size: 12px; z-index: 100; pointer-events: none;
+            font-family: monospace;
+        }
     </style>
 </head>
 <body>
+    <div id="guide">SWIPE TO DIRECT LIGHT / TOUCH TO STOP ROTATION</div>
     <div id="ui">
-        <div class="row">
-            <button id="btnShape" onclick="toggleShape()">▲ SHAPE</button>
-            <button id="btnRotate" onclick="toggleRotate()">🔄 ROTATION ON</button>
-        </div>
+        <button onclick="toggleShape()">▲ CHANGE SHAPE</button>
+        <button onclick="toggleRotate()">🔄 ROTATION ON/OFF</button>
     </div>
     <div id="canvas-container"></div>
 
@@ -41,21 +43,29 @@
 
         function toggleRotate() {
             isRotating = !isRotating;
-            const btn = document.getElementById('btnRotate');
-            btn.innerText = isRotating ? "🔄 ROTATION ON" : "⏸️ PAUSED";
             uniforms.u_isRotating.value = isRotating ? 1.0 : 0.0;
         }
 
         function toggleShape() {
             shapeMode = 1 - shapeMode;
             uniforms.u_shapeMix.value = shapeMode;
-            document.getElementById('btnShape').innerText = shapeMode === 0 ? "▲ PRISM" : "● METABALL";
         }
+
+        // スワイプ操作で光の「方向」を変える
+        const handleMove = (e) => {
+            const x = (e.touches ? e.touches[0].clientX : e.clientX) / window.innerWidth;
+            const y = (e.touches ? e.touches[0].clientY : e.clientY) / window.innerHeight;
+            // 画面中心からのベクトルを計算して方向（rd）にする
+            const dir = new THREE.Vector2((x - 0.5) * 2.0, (0.5 - y) * 2.0).normalize();
+            if(uniforms) uniforms.u_lightDir.value.copy(dir);
+        };
+        window.addEventListener('mousemove', handleMove);
+        window.addEventListener('touchmove', handleMove);
 
         window.onload = () => {
             const scene = new THREE.Scene();
             const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-            const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false });
+            const renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
             renderer.setSize(window.innerWidth, window.innerHeight);
             document.getElementById('canvas-container').appendChild(renderer.domElement);
@@ -63,6 +73,7 @@
             uniforms = {
                 u_time: { value: 0 },
                 u_resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+                u_lightDir: { value: new THREE.Vector2(1.0, 0.0) }, // 初期方向は右向き
                 u_isRotating: { value: 1.0 },
                 u_shapeMix: { value: 0.0 }
             };
@@ -70,14 +81,14 @@
             const vertexShader = `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position, 1.0); }`;
 
             const fragmentShader = `
-                precision mediump float;
+                precision highp float;
                 uniform vec2 u_resolution;
                 uniform float u_time;
+                uniform vec2 u_lightDir;
                 uniform float u_isRotating;
                 uniform float u_shapeMix;
                 varying vec2 vUv;
 
-                // 24本のパスで「塗りつぶし」を実現
                 #define SAMPLES 24
                 #define EPS 0.002
 
@@ -93,13 +104,115 @@
                     return mix(b, a, h) - k * h * (1.0 - h);
                 }
 
+                // 形状の定義（中央配置・大型化）
                 float map(vec2 p) {
                     float t = u_time * u_isRotating;
                     float s = sin(t * 0.4), c = cos(t * 0.4);
                     mat2 rot = mat2(c, -s, s, c);
-                    float d1 = sdTriangle(p * rot, 0.16); // 1/3 Scale
-                    float m1 = sdCircle(p - vec2(sin(t*0.5)*0.2, 0), 0.1);
-                    float m2 = sdCircle(p - vec2(cos(t*0.5)*0.2, 0), 0.1);
+                    
+                    // プリズム（中央・サイズ3倍：0.48）
+                    float d1 = sdTriangle(p * rot, 0.48);
+                    
+                    // メタボール（中央・サイズ3倍）
+                    float m1 = sdCircle(p - vec2(sin(t*0.5)*0.3, 0), 0.3);
+                    float m2 = sdCircle(p - vec2(cos(t*0.5)*0.3, 0), 0.3);
+                    float d2 = smin(m1, m2, 0.4);
+                    
+                    return mix(d1, d2, u_shapeMix);
+                }
+
+                vec2 getNormal(vec2 p) {
+                    vec2 e = vec2(EPS, 0.0);
+                    return normalize(vec2(map(p+e.xy)-map(p-e.xy), map(p+e.yx)-map(p-e.yx)));
+                }
+
+                vec3 palette(float t) {
+                    return clamp(abs(mod(t*6.0+vec3(0,4,2),6.0)-3.0)-1.0, 0.0, 1.0);
+                }
+
+                float dfLine(vec2 p, vec2 a, vec2 b) {
+                    vec2 pa = p - a, ba = b - a;
+                    return length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0));
+                }
+
+                void main() {
+                    vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / min(u_resolution.y, u_resolution.x);
+                    vec3 finalCol = vec3(0.0);
+                    
+                    // 光源：画面端（左側）
+                    vec2 ro = u_lightDir * -1.2; 
+                    vec2 rd = u_lightDir; // スワイプで決めた方向に飛ぶ
+
+                    for(int i = 0; i < SAMPLES; i++) {
+                        float t = float(i) / float(SAMPLES);
+                        vec3 waveCol = palette(t) * (4.0 / float(SAMPLES));
+                        float ior = 1.3 + t * 0.4; // 屈折率の差
+
+                        // 1. 入射
+                        float t1 = 0.0;
+                        for(int j=0; j<24; j++) {
+                            float d = map(ro + rd * t1);
+                            if(d < EPS || t1 > 3.0) break;
+                            t1 += d;
+                        }
+
+                        if(t1 < 3.0) {
+                            vec2 p1 = ro + rd * t1;
+                            // 入射パス
+                            finalCol += waveCol * smoothstep(0.008, 0.0, dfLine(uv, ro, p1)) * 0.2;
+
+                            vec2 n1 = getNormal(p1);
+                            vec2 rd_in = refract(rd, n1, 1.0/ior);
+                            if(length(rd_in) < 0.1) rd_in = reflect(rd, n1);
+
+                            // 2. 内部
+                            float t2 = 0.02;
+                            for(int j=0; j<24; j++) {
+                                float d = -map(p1 + rd_in * t2);
+                                if(d < EPS || t2 > 2.0) break;
+                                t2 += d;
+                            }
+                            vec2 p2 = p1 + rd_in * t2;
+                            // 内部：太めのパスで塗りつぶし
+                            finalCol += waveCol * smoothstep(0.015, 0.0, dfLine(uv, p1, p2)) * 0.7;
+
+                            // 3. 出射
+                            vec2 n2 = getNormal(p2);
+                            vec2 rd_out = refract(rd_in, -n2, ior);
+                            if(length(rd_out) > 0.1) {
+                                // 出射：虹の帯を太く
+                                finalCol += waveCol * smoothstep(0.025, 0.0, dfLine(uv, p2, p2 + rd_out * 2.5)) * 1.5;
+                            }
+                        }
+                    }
+                    
+                    // プリズムの存在感（輪郭と透過）
+                    float dist = map(uv);
+                    finalCol += smoothstep(0.005, 0.0, abs(dist)) * vec3(0.0, 1.0, 0.7) * 0.3;
+                    if(dist < 0.0) finalCol += vec3(0.02, 0.05, 0.07);
+
+                    gl_FragColor = vec4(finalCol, 1.0);
+                }
+            `;
+
+            const material = new THREE.ShaderMaterial({ uniforms, vertexShader, fragmentShader });
+            scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
+
+            function animate(time) {
+                uniforms.u_time.value = time * 0.001;
+                renderer.render(scene, camera);
+                requestAnimationFrame(animate);
+            }
+            animate(0);
+
+            window.addEventListener('resize', () => {
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                uniforms.u_resolution.value.set(window.innerWidth, window.innerHeight);
+            });
+        };
+    </script>
+</body>
+</html>
                     return mix(d1, smin(m1, m2, 0.15), u_shapeMix);
                 }
 
