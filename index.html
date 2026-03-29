@@ -3,32 +3,29 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>7-Color Multi-Bounce Prism</title>
+    <title>Master Prism Pro v5.0</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-        body { width: 100vw; height: 100vh; overflow: hidden; background-color: #030303; font-family: 'Courier New', monospace; }
+        body { width: 100vw; height: 100vh; overflow: hidden; background-color: #050505; font-family: monospace; }
         canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; display: block; }
-        
-        #ui { position: absolute; bottom: 25px; left: 0; width: 100%; z-index: 10; display: flex; flex-direction: column; align-items: center; gap: 12px; pointer-events: none; }
-        .slider-box { width: 85%; max-width: 320px; display: flex; color: #0f0; gap: 10px; align-items: center; background: rgba(0,0,0,0.85); padding: 12px; border-radius: 12px; border: 1px solid #0f0; pointer-events: auto; }
+        #ui { position: absolute; bottom: 25px; left: 0; width: 100%; z-index: 10; display: flex; flex-direction: column; align-items: center; gap: 10px; pointer-events: none; }
+        .slider-box { width: 85%; max-width: 320px; display: flex; color: #0f0; gap: 10px; align-items: center; background: rgba(0,0,0,0.85); padding: 10px 15px; border-radius: 12px; border: 1px solid #0f0; pointer-events: auto; }
+        .slider-box span { min-width: 45px; font-size: 11px; }
         input[type=range] { flex-grow: 1; accent-color: #0f0; cursor: pointer; }
-        
         .btns { display: flex; gap: 8px; pointer-events: auto; }
-        button { padding: 10px 14px; background: #000; color: #0f0; border: 1px solid #0f0; border-radius: 6px; font-weight: bold; font-size: 11px; font-family: inherit; cursor: pointer; }
+        button { padding: 10px 14px; background: #000; color: #0f0; border: 1px solid #0f0; border-radius: 6px; font-weight: bold; font-size: 11px; font-family: inherit; }
         button:active { background: #0f0; color: #000; }
-        
-        #stats { position: absolute; top: 20px; left: 20px; color: #0f0; font-size: 13px; font-weight: bold; z-index: 10; pointer-events: none; text-shadow: 0 0 5px #000; line-height: 1.5; }
+        #stats { position: absolute; top: 20px; left: 20px; color: #0f0; font-size: 13px; font-weight: bold; z-index: 10; pointer-events: none; text-shadow: 0 0 5px #000; }
     </style>
 </head>
 <body>
     <div id="stats">
-        IOR: <span id="ior-val">1.45</span><br>
-        BOUNCES: 5 MAX<br>
-        SPECTRUM: 7 RAYS
+        IOR: <span id="v-ior">1.45</span> | RAYS: <span id="v-rays">3</span><br>
+        BOUNCES: 5 MAX
     </div>
-    
     <div id="ui">
-        <div class="slider-box"><span>IOR</span><input type="range" id="ior-slider" min="1.0" max="2.5" step="0.01" value="1.45"></div>
+        <div class="slider-box"><span>IOR</span><input type="range" id="ior-s" min="1.0" max="2.5" step="0.01" value="1.45"></div>
+        <div class="slider-box"><span>RAYS</span><input type="range" id="rays-s" min="1" max="12" step="1" value="3"></div>
         <div class="btns">
             <button onclick="toggleShape()">SHAPE</button>
             <button onclick="toggleRotate()" id="rot-btn">STOP ROTATION</button>
@@ -47,61 +44,67 @@
             uniforms.u_isRotating.value = isRotating ? 1.0 : 0.0;
             document.getElementById('rot-btn').innerText = isRotating ? "STOP ROTATION" : "START ROTATION";
         }
-
         function toggleShape() {
             shapeMode = 1 - shapeMode;
             uniforms.u_shapeMix.value = shapeMode;
             uniforms.u_seed.value = Math.random() * 100.0;
         }
-
         function resetAll() {
             shapeMode = 0; isRotating = true;
-            uniforms.u_shapeMix.value = 0.0;
-            uniforms.u_isRotating.value = 1.0;
-            uniforms.u_ior.value = 1.45;
+            uniforms.u_shapeMix.value = 0.0; uniforms.u_isRotating.value = 1.0;
+            uniforms.u_ior.value = 1.45; uniforms.u_colorCount.value = 3.0;
             uniforms.u_lightDir.value.set(0, -1);
-            document.getElementById('ior-slider').value = 1.45;
-            document.getElementById('ior-val').innerText = "1.45";
+            document.getElementById('ior-s').value = 1.45; document.getElementById('rays-s').value = 3;
+            document.getElementById('v-ior').innerText = "1.45"; document.getElementById('v-rays').innerText = "3";
             document.getElementById('rot-btn').innerText = "STOP ROTATION";
         }
 
-        const iorSlider = document.getElementById('ior-slider');
-        iorSlider.addEventListener('input', (e) => {
+        document.getElementById('ior-s').addEventListener('input', (e) => {
             const v = parseFloat(e.target.value);
-            uniforms.u_ior.value = v;
-            document.getElementById('ior-val').innerText = v.toFixed(2);
+            uniforms.u_ior.value = v; document.getElementById('v-ior').innerText = v.toFixed(2);
+        });
+        document.getElementById('rays-s').addEventListener('input', (e) => {
+            const v = parseFloat(e.target.value);
+            uniforms.u_colorCount.value = v; document.getElementById('v-rays').innerText = v;
         });
 
-        // スワイプによる方向ベクトル指定
-        window.addEventListener('touchstart', (e) => {
-            startPos.set(e.touches[0].clientX, e.touches[0].clientY);
-        }, { passive: false });
-
+        window.addEventListener('touchstart', (e) => { startPos.set(e.touches[0].clientX, e.touches[0].clientY); });
         window.addEventListener('touchend', (e) => {
             const endPos = new THREE.Vector2(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
             const delta = new THREE.Vector2().subVectors(endPos, startPos);
-            if(delta.length() > 20) {
+            if(delta.length() > 15) {
                 const dir = delta.normalize();
-                uniforms.u_lightDir.value.set(dir.x, -dir.y); // Y反転
+                uniforms.u_lightDir.value.set(dir.x, -dir.y);
             }
         });
 
         window.onload = () => {
             const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(1); // 安定性重視
+            renderer.setPixelRatio(1);
             document.body.appendChild(renderer.domElement);
 
             uniforms = {
                 u_time: { value: 0 },
                 u_resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
-                u_                float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 78.2))) * 43758.5); }
-                float noise(vec2 p) {
-                    vec2 i = floor(p), f = fract(p);
-                    vec2 u = f*f*(3.0-2.0*f);
-                    return mix(mix(hash(i), hash(i+vec2(1,0)), u.x), mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), u.x), u.y);
-                }
+                u_lightDir: { value: new THREE.Vector2(0.0, -1.0) },
+                u_ior: { value: 1.45 },
+                u_colorCount: { value: 3.0 },
+                u_shapeMix: { value: 0.0 },
+                u_isRotating: { value: 1.0 },
+                u_seed: { value: 42.0 }
+            };
 
+            const fragmentShader = `
+                precision highp float;
+                uniform vec2 u_resolution;
+                uniform float u_time, u_ior, u_colorCount, u_shapeMix, u_isRotating, u_seed;
+
+                #define MAX_BOUNCES 5
+                #define BEAM_W 0.001
+                #define EPS 0.002
+
+                float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 78.2))) * 43758.5); }
                 float sdRoundedTriangle(vec2 p, float r, float f) {
                     const float k = sqrt(3.0);
                     p.x = abs(p.x) - r; p.y = p.y + r/k;
@@ -109,37 +112,32 @@
                     p.x -= clamp( p.x, -2.0*r, 0.0 );
                     return -length(p)*sign(p.y) - f;
                 }
-
                 float smin(float a, float b, float k) {
                     float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
                     return mix(b, a, h) - k * h * (1.0 - h);
                 }
-
                 float map(vec2 p) {
                     float t = u_time * u_isRotating * 0.3;
-                    float s = sin(t), c = cos(t);
-                    mat2 rot = mat2(c, -s, s, c);
-                    // プリズム (1.5倍)
-                    float d1 = sdRoundedTriangle(p * rot, 0.375, 0.03); 
-                    // 滑らかなメタボール
-                    float d2 = length(p) - 0.2;
+                    float s = sin(t), c = cos(t); mat2 rot = mat2(c, -s, s, c);
+                    float d1 = sdRoundedTriangle(p * rot, 0.375, 0.03);
+                    float d2 = length(p) - 0.22;
                     for(int i=0; i<3; i++) {
                         float fi = float(i);
-                        vec2 off = vec2(hash(vec2(fi, u_seed))-0.5, hash(vec2(fi*1.3, u_seed)) - 0.5) * 0.6;
-                        d2 = smin(d2, length(p - off) - (0.05 + hash(vec2(fi*1.7, u_seed))*0.1), 0.3);
+                        vec2 off = vec2(hash(vec2(fi, u_seed))-0.5, hash(vec2(fi*1.3, u_seed))-0.5) * 0.7;
+                        d2 = smin(d2, length(p - off) - (0.05 + hash(vec2(fi*1.7, u_seed))*0.1), 0.35);
                     }
-                    d2 += (noise(p * 10.0 + u_seed) - 0.5) * 0.008;
                     return mix(d1, d2, u_shapeMix);
                 }
-
                 vec2 getNormal(vec2 p) {
                     vec2 e = vec2(EPS, 0);
                     return normalize(vec2(map(p+e.xy)-map(p-e.xy), map(p+e.yx)-map(p-e.yx)));
                 }
-
                 float dfLine(vec2 p, vec2 a, vec2 b) {
                     vec2 pa = p - a, ba = b - a;
                     return length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0));
+                }
+                vec3 pal(float t) {
+                    return 0.5 + 0.5 * cos(6.28318 * (vec3(1,1,1) * t + vec3(0.0, 0.33, 0.67)));
                 }
 
                 void main() {
@@ -156,36 +154,37 @@
                     }
 
                     if(t < 2.5) {
-                        vec2 p_cur = ro + rd * t;
-                        vec2 n = getNormal(p_cur);
-                        col += vec3(smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, ro, p_cur)) * 0.3);
+                        vec2 p_inc = ro + rd * t;
+                        vec2 n_inc = getNormal(p_inc);
+                        col += vec3(smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, ro, p_inc)) * 0.3);
 
-                        // --- 精密マルチパス (3波長のみに絞って安定化) ---
-                        for(int i=0; i<3; i++) {
-                            vec3 waveCol = (i==0)?vec3(1,0,0):(i==1)?vec3(0,1,0):vec3(0,0.5,1);
-                            float cur_ior = u_ior + (float(i)/2.0 - 0.5) * 0.25;
+                        int count = int(u_colorCount);
+                        for(int i=0; i<12; i++) {
+                            if(i >= count) break;
+                            float f = float(i) / max(1.0, u_colorCount - 1.0);
+                            vec3 waveCol = pal(f);
+                            float cur_ior = u_ior + (f - 0.5) * 0.3;
                             
-                            vec2 ray_p = p_cur;
-                            vec2 ray_d = refract(rd, n, 1.0/cur_ior);
-                            if(length(ray_d) < 0.1) ray_d = reflect(rd, n);
+                            vec2 ray_p = p_inc;
+                            vec2 ray_d = refract(rd, n_inc, 1.0/cur_ior);
+                            if(length(ray_d) < 0.1) ray_d = reflect(rd, n_inc);
 
                             for(int bounce=0; bounce < MAX_BOUNCES; bounce++) {
                                 float t_exit = 0.05;
-                                for(int step=0; step<16; step++) {
+                                for(int step=0; step<12; step++) {
                                     float d = -map(ray_p + ray_d * t_exit);
                                     if(d < EPS || t_exit > 2.0) break;
                                     t_exit += d;
                                 }
-                                vec2 p_next = ray_p + ray_d * t_exit;
-                                vec2 n_next = getNormal(p_next);
-                                col += waveCol * smoothstep(BEAM_W+0.001, BEAM_W, dfLine(uv, ray_p, p_next)) * 0.2;
+                                vec2 p_exit = ray_p + ray_d * t_exit;
+                                vec2 n_exit = getNormal(p_exit);
+                                col += waveCol * smoothstep(BEAM_W+0.001, BEAM_W, dfLine(uv, ray_p, p_exit)) * 0.2;
                                 
-                                vec2 rd_out = refract(ray_d, -n_next, cur_ior);
+                                vec2 rd_out = refract(ray_d, -n_exit, cur_ior);
                                 if(length(rd_out) < 0.1) {
-                                    ray_d = reflect(ray_d, -n_next);
-                                    ray_p = p_next;
+                                    ray_d = reflect(ray_d, -n_exit); ray_p = p_exit;
                                 } else {
-                                    col += waveCol * smoothstep(BEAM_W+0.001, BEAM_W, dfLine(uv, p_next, p_next + rd_out * 2.0));
+                                    col += waveCol * smoothstep(BEAM_W+0.001, BEAM_W, dfLine(uv, p_exit, p_exit + rd_out * 2.0));
                                     break;
                                 }
                             }
@@ -198,168 +197,11 @@
                 }
             `;
 
-            const scene = new THREE.Scene();
             const material = new THREE.ShaderMaterial({ uniforms, vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position, 1.0); }`, fragmentShader });
-            scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
+            const scene = new THREE.Scene(); scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
             const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-            function animate(time) { uniforms.u_time.value = time * 0.001; renderer.render(scene, camera); requestAnimationFrame(animate); }
+            function animate(t) { uniforms.u_time.value = t * 0.001; renderer.render(scene, camera); requestAnimationFrame(animate); }
             animate(0);
-        };
-    </script>
-</body>
-</html>
-                uniform vec2 u_resolution;
-                uniform float u_time;
-                uniform vec2 u_lightDir;
-                uniform float u_ior;
-                uniform float u_shapeMix;
-                uniform float u_isRotating;
-                uniform float u_seed;
-
-                #define MAX_BOUNCES 5
-                #define BEAM_W 0.001
-                #define EPS 0.001
-
-                float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-                float noise(vec2 p) {
-                    vec2 i = floor(p), f = fract(p);
-                    vec2 u = f*f*(3.0-2.0*f);
-                    return mix(mix(hash(i), hash(i+vec2(1,0)), u.x), mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), u.x), u.y);
-                }
-
-                float sdRoundedTriangle(vec2 p, float r, float f) {
-                    const float k = sqrt(3.0);
-                    p.x = abs(p.x) - r; p.y = p.y + r/k;
-                    if( p.x+k*p.y>0.0 ) p = vec2(p.x-k*p.y,-k*p.x-p.y)/2.0;
-                    p.x -= clamp( p.x, -2.0*r, 0.0 );
-                    return -length(p)*sign(p.y) - f;
-                }
-
-                float smin(float a, float b, float k) {
-                    float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
-                    return mix(b, a, h) - k * h * (1.0 - h);
-                }
-
-                float sdMetaballs(vec2 p) {
-                    float d = length(p) - 0.2;
-                    for(int i=0; i<5; i++) {
-                        float fi = float(i);
-                        vec2 off = vec2(noise(vec2(fi, u_seed))-0.5, noise(vec2(fi*1.4, u_seed+fi))-0.5) * 0.7;
-                        d = smin(d, length(p - off) - (0.05 + noise(vec2(fi*1.9, u_seed))*0.1), 0.3); // k値を上げ、滑らかに
-                    }
-                    d += (noise(p * 10.0 + u_seed) - 0.5) * 0.008; // 界面の不連続を抑えるためノイズを微細化
-                    return d;
-                }
-
-                float map(vec2 p) {
-                    float t = u_time * u_isRotating * 0.3;
-                    float s = sin(t), c = cos(t);
-                    mat2 rot = mat2(c, -s, s, c);
-                    float d1 = sdRoundedTriangle(p * rot, 0.375, 0.03); 
-                    float d2 = sdMetaballs(p * rot);
-                    return mix(d1, d2, u_shapeMix);
-                }
-
-                vec2 getNormal(vec2 p) {
-                    vec2 e = vec2(EPS, 0);
-                    return normalize(vec2(map(p+e.xy)-map(p-e.xy), map(p+e.yx)-map(p-e.yx)));
-                }
-
-                float dfLine(vec2 p, vec2 a, vec2 b) {
-                    vec2 pa = p - a, ba = b - a;
-                    return length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0));
-                }
-
-                vec3 get7Color(int i) {
-                    if(i==0) return vec3(1,0,0); if(i==1) return vec3(1,0.5,0);
-                    if(i==2) return vec3(1,1,0); if(i==3) return vec3(0,1,0);
-                    if(i==4) return vec3(0,0.5,1); if(i==5) return vec3(0,0,1);
-                    return vec3(0.5,0,1);
-                }
-
-                void main() {
-                    vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / min(u_resolution.y, u_resolution.x);
-                    vec3 col = vec3(0.0);
-                    vec2 rd = normalize(u_lightDir);
-                    vec2 ro = rd * -1.5;
-
-                    // 1. 入射
-                    float t = 0.0;
-                    for(int j=0; j<32; j++) {
-                        float d = map(ro + rd * t);
-                        if(d < EPS || t > 2.5) break;
-                        t += d;
-                    }
-
-                    if(t < 2.5) {
-                        vec2 p_cur = ro + rd * t;
-                        vec2 n = getNormal(p_cur);
-                        col += vec3(smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, ro, p_cur)) * 0.4);
-
-                        // --- マルチパス・レイトレーシング ---
-                        for(int i=0; i<7; i++) {
-                            vec3 waveCol = get7Color(i);
-                            float cur_ior = u_ior + (float(i)/6.0 - 0.5) * 0.3;
-                            
-                            vec2 ray_p = p_cur;
-                            vec2 ray_d = refract(rd, n, 1.0/cur_ior);
-                            if(length(ray_d) < 0.1) ray_d = reflect(rd, n);
-
-                            // 最大5回反射
-                            for(int bounce=0; bounce < MAX_BOUNCES; bounce++) {
-                                float t_exit = 0.05;
-                                for(int step=0; step<24; step++) {
-                                    float d = -map(ray_p + ray_d * t_exit);
-                                    if(d < EPS || t_exit > 2.0) break;
-                                    t_exit += d;
-                                }
-                                
-                                vec2 p_next = ray_p + ray_d * t_exit;
-                                vec2 n_next = getNormal(p_next);
-                                
-                                // 内部パス描画
-                                col += waveCol * smoothstep(BEAM_W+0.001, BEAM_W, dfLine(uv, ray_p, p_next)) * 0.2;
-
-                                // 出射または反射
-                                vec2 rd_out = refract(ray_d, -n_next, cur_ior);
-                                if(length(rd_out) < 0.1) {
-                                    // 全反射 (TIR)
-                                    ray_d = reflect(ray_d, -n_next);
-                                    ray_p = p_next;
-                                } else {
-                                    // 出射
-                                    col += waveCol * smoothstep(BEAM_W+0.001, BEAM_W, dfLine(uv, p_next, p_next + rd_out * 2.0));
-                                    break;
-                                }
-                            }
-                        }
-                    } else {
-                        col += vec3(smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, ro, ro + rd * 3.0)) * 0.1);
-                    }
-                    col += smoothstep(0.003, 0.0, abs(map(uv))) * vec3(0, 1, 0.6) * 0.2;
-                    gl_FragColor = vec4(col, 1.0);
-                }
-            `;
-
-            const material = new THREE.ShaderMaterial({
-                uniforms,
-                vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position, 1.0); }`,
-                fragmentShader
-            });
-            const scene = new THREE.Scene();
-            scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
-
-            function animate(time) {
-                uniforms.u_time.value = time * 0.001;
-                renderer.render(scene, new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1));
-                requestAnimationFrame(animate);
-            }
-            animate(0);
-
-            window.addEventListener('resize', () => {
-                renderer.setSize(window.innerWidth, window.innerHeight);
-                uniforms.u_resolution.value.set(window.innerWidth, window.innerHeight);
-            });
         };
     </script>
 </body>
