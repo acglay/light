@@ -3,26 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Multi-Bounce Prism Sandbox</title>
+    <title>Multi-Bounce Prism Final</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-        body { width: 100vw; height: 100vh; overflow: hidden; background-color: #050505; font-family: 'Courier New', monospace; }
+        body { width: 100vw; height: 100vh; overflow: hidden; background-color: #050505; font-family: monospace; }
         canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; display: block; }
-        #ui { position: absolute; bottom: 20px; left: 0; width: 100%; z-index: 10; display: flex; flex-direction: column; align-items: center; gap: 10px; pointer-events: none; }
-        .slider-box { width: 85%; max-width: 320px; display: flex; color: #0f0; gap: 10px; align-items: center; background: rgba(0,0,0,0.85); padding: 10px 15px; border-radius: 12px; border: 1px solid #0f0; pointer-events: auto; }
+        #ui { position: absolute; bottom: 25px; left: 0; width: 100%; z-index: 10; display: flex; flex-direction: column; align-items: center; gap: 12px; pointer-events: none; }
+        .slider-box { width: 85%; max-width: 320px; display: flex; color: #0f0; gap: 10px; align-items: center; background: rgba(0,0,0,0.85); padding: 12px; border-radius: 12px; border: 1px solid #0f0; pointer-events: auto; }
         input[type=range] { flex-grow: 1; accent-color: #0f0; cursor: pointer; }
-        .btns { display: flex; gap: 10px; pointer-events: auto; }
-        button { padding: 10px 18px; background: #000; color: #0f0; border: 1px solid #0f0; border-radius: 6px; font-weight: bold; cursor: pointer; font-family: inherit; font-size: 12px; }
+        .btns { display: flex; gap: 8px; pointer-events: auto; }
+        button { padding: 10px 15px; background: #000; color: #0f0; border: 1px solid #0f0; border-radius: 6px; font-weight: bold; font-size: 11px; font-family: inherit; }
         button:active { background: #0f0; color: #000; }
-        #stats { position: absolute; top: 20px; left: 20px; color: #0f0; font-size: 0.9rem; font-weight: bold; z-index: 10; pointer-events: none; text-shadow: 0 0 5px #000; line-height: 1.4; }
+        #stats { position: absolute; top: 20px; left: 20px; color: #0f0; font-size: 14px; font-weight: bold; z-index: 10; pointer-events: none; text-shadow: 0 0 5px #000; }
     </style>
 </head>
 <body>
-    <div id="stats">
-        IOR: <span id="ior-val">1.45</span><br>
-        BOUNCES: 5 MAX<br>
-        MODE: ANALYTICAL RAY-TRACING
-    </div>
+    <div id="stats">IOR: <span id="ior-val">1.45</span><br>BOUNCES: 5 MAX</div>
     <div id="ui">
         <div class="slider-box"><span>IOR</span><input type="range" id="ior-slider" min="1.0" max="2.5" step="0.01" value="1.45"></div>
         <div class="btns">
@@ -43,19 +39,15 @@
             uniforms.u_isRotating.value = isRotating ? 1.0 : 0.0;
             document.getElementById('rot-btn').innerText = isRotating ? "STOP ROTATION" : "START ROTATION";
         }
-
         function toggleShape() {
             shapeMode = 1 - shapeMode;
             uniforms.u_shapeMix.value = shapeMode;
             uniforms.u_seed.value = Math.random() * 100.0;
         }
-
         function resetAll() {
             shapeMode = 0; isRotating = true;
-            uniforms.u_shapeMix.value = 0.0;
-            uniforms.u_isRotating.value = 1.0;
-            uniforms.u_ior.value = 1.45;
-            uniforms.u_lightDir.value.set(0, -1);
+            uniforms.u_shapeMix.value = 0.0; uniforms.u_isRotating.value = 1.0;
+            uniforms.u_ior.value = 1.45; uniforms.u_lightDir.value.set(0, -1);
             document.getElementById('ior-slider').value = 1.45;
             document.getElementById('ior-val').innerText = "1.45";
             document.getElementById('rot-btn').innerText = "STOP ROTATION";
@@ -68,24 +60,20 @@
             document.getElementById('ior-val').innerText = v.toFixed(2);
         });
 
-        // スワイプ操作：開始と終了のベクトル
-        window.addEventListener('touchstart', (e) => {
-            startPos.set(e.touches[0].clientX, e.touches[0].clientY);
-        });
-
+        window.addEventListener('touchstart', (e) => { startPos.set(e.touches[0].clientX, e.touches[0].clientY); });
         window.addEventListener('touchend', (e) => {
             const endPos = new THREE.Vector2(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
             const dir = new THREE.Vector2().subVectors(endPos, startPos);
-            if(dir.length() > 10) {
+            if(dir.length() > 20) {
                 uniforms.u_lightDir.value.copy(dir.normalize());
-                uniforms.u_lightDir.value.y *= -1.0; // スクリーン座標補正
+                uniforms.u_lightDir.value.y *= -1.0;
             }
         });
 
         window.onload = () => {
-            const renderer = new THREE.WebGLRenderer({ antialias: true });
+            const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setPixelRatio(1); // クラッシュ防止
             document.body.appendChild(renderer.domElement);
 
             uniforms = {
@@ -100,6 +88,131 @@
 
             const fragmentShader = `
                 precision highp float;
+                uniform vec2 u_resolution;
+                uniform float u_time;
+                uniform vec2 u_lightDir;
+                uniform float u_ior;
+                uniform float u_shapeMix;
+                uniform float u_isRotating;
+                uniform float u_seed;
+
+                #define MAX_BOUNCES 5
+                #define BEAM_W 0.001
+                #define EPS 0.002
+
+                float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 78.2))) * 43758.5); }
+                float noise(vec2 p) {
+                    vec2 i = floor(p), f = fract(p);
+                    vec2 u = f*f*(3.0-2.0*f);
+                    return mix(mix(hash(i), hash(i+vec2(1,0)), u.x), mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), u.x), u.y);
+                }
+
+                float sdRoundedTriangle(vec2 p, float r, float f) {
+                    const float k = sqrt(3.0);
+                    p.x = abs(p.x) - r; p.y = p.y + r/k;
+                    if( p.x+k*p.y>0.0 ) p = vec2(p.x-k*p.y,-k*p.x-p.y)/2.0;
+                    p.x -= clamp( p.x, -2.0*r, 0.0 );
+                    return -length(p)*sign(p.y) - f;
+                }
+
+                float smin(float a, float b, float k) {
+                    float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+                    return mix(b, a, h) - k * h * (1.0 - h);
+                }
+
+                float map(vec2 p) {
+                    float t = u_time * u_isRotating * 0.3;
+                    float s = sin(t), c = cos(t);
+                    mat2 rot = mat2(c, -s, s, c);
+                    // プリズム (1.5倍)
+                    float d1 = sdRoundedTriangle(p * rot, 0.375, 0.03); 
+                    // 滑らかなメタボール
+                    float d2 = length(p) - 0.2;
+                    for(int i=0; i<3; i++) {
+                        float fi = float(i);
+                        vec2 off = vec2(hash(vec2(fi, u_seed))-0.5, hash(vec2(fi*1.3, u_seed)) - 0.5) * 0.6;
+                        d2 = smin(d2, length(p - off) - (0.05 + hash(vec2(fi*1.7, u_seed))*0.1), 0.3);
+                    }
+                    d2 += (noise(p * 10.0 + u_seed) - 0.5) * 0.008;
+                    return mix(d1, d2, u_shapeMix);
+                }
+
+                vec2 getNormal(vec2 p) {
+                    vec2 e = vec2(EPS, 0);
+                    return normalize(vec2(map(p+e.xy)-map(p-e.xy), map(p+e.yx)-map(p-e.yx)));
+                }
+
+                float dfLine(vec2 p, vec2 a, vec2 b) {
+                    vec2 pa = p - a, ba = b - a;
+                    return length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0));
+                }
+
+                void main() {
+                    vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / min(u_resolution.y, u_resolution.x);
+                    vec3 col = vec3(0.0);
+                    vec2 rd = normalize(u_lightDir);
+                    vec2 ro = rd * -1.5;
+
+                    float t = 0.0;
+                    for(int j=0; j<24; j++) {
+                        float d = map(ro + rd * t);
+                        if(d < EPS || t > 2.5) break;
+                        t += d;
+                    }
+
+                    if(t < 2.5) {
+                        vec2 p_cur = ro + rd * t;
+                        vec2 n = getNormal(p_cur);
+                        col += vec3(smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, ro, p_cur)) * 0.3);
+
+                        // --- 精密マルチパス (3波長のみに絞って安定化) ---
+                        for(int i=0; i<3; i++) {
+                            vec3 waveCol = (i==0)?vec3(1,0,0):(i==1)?vec3(0,1,0):vec3(0,0.5,1);
+                            float cur_ior = u_ior + (float(i)/2.0 - 0.5) * 0.25;
+                            
+                            vec2 ray_p = p_cur;
+                            vec2 ray_d = refract(rd, n, 1.0/cur_ior);
+                            if(length(ray_d) < 0.1) ray_d = reflect(rd, n);
+
+                            for(int bounce=0; bounce < MAX_BOUNCES; bounce++) {
+                                float t_exit = 0.05;
+                                for(int step=0; step<16; step++) {
+                                    float d = -map(ray_p + ray_d * t_exit);
+                                    if(d < EPS || t_exit > 2.0) break;
+                                    t_exit += d;
+                                }
+                                vec2 p_next = ray_p + ray_d * t_exit;
+                                vec2 n_next = getNormal(p_next);
+                                col += waveCol * smoothstep(BEAM_W+0.001, BEAM_W, dfLine(uv, ray_p, p_next)) * 0.2;
+                                
+                                vec2 rd_out = refract(ray_d, -n_next, cur_ior);
+                                if(length(rd_out) < 0.1) {
+                                    ray_d = reflect(ray_d, -n_next);
+                                    ray_p = p_next;
+                                } else {
+                                    col += waveCol * smoothstep(BEAM_W+0.001, BEAM_W, dfLine(uv, p_next, p_next + rd_out * 2.0));
+                                    break;
+                                }
+                            }
+                        }
+                    } else {
+                        col += vec3(smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, ro, ro + rd * 3.0)) * 0.1);
+                    }
+                    col += smoothstep(0.003, 0.0, abs(map(uv))) * vec3(0, 1, 0.6) * 0.2;
+                    gl_FragColor = vec4(col, 1.0);
+                }
+            `;
+
+            const scene = new THREE.Scene();
+            const material = new THREE.ShaderMaterial({ uniforms, vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position, 1.0); }`, fragmentShader });
+            scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
+            const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+            function animate(time) { uniforms.u_time.value = time * 0.001; renderer.render(scene, camera); requestAnimationFrame(animate); }
+            animate(0);
+        };
+    </script>
+</body>
+</html>
                 uniform vec2 u_resolution;
                 uniform float u_time;
                 uniform vec2 u_lightDir;
