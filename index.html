@@ -3,35 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Master Prism Final - Ozzy Edition</title>
+    <title>Final Master Prism</title>
     <style>
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body { margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; background-color: #000; font-family: monospace; }
-        canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; display: block; z-index: 1; }
+        canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; display: block; }
         #ui { position: absolute; bottom: 30px; left: 0; width: 100%; z-index: 100; display: flex; flex-direction: column; align-items: center; gap: 15px; }
-        .slider-box { width: 80%; max-width: 300px; display: flex; color: #0f0; gap: 10px; align-items: center; }
+        .slider-box { width: 85%; max-width: 320px; display: flex; color: #0f0; gap: 10px; align-items: center; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 8px; }
         input[type=range] { flex-grow: 1; accent-color: #0f0; cursor: pointer; }
-        .btns { display: flex; gap: 10px; }
-        button { padding: 12px 18px; background: rgba(0,0,0,0.8); color: #0f0; border: 1px solid #0f0; border-radius: 5px; font-weight: bold; }
-        #stats { position: absolute; top: 20px; left: 20px; color: #0f0; font-size: 1.2rem; font-weight: bold; text-shadow: 0 0 8px #0f0; z-index: 100; pointer-events: none; }
+        button { padding: 12px 24px; background: rgba(0,0,0,0.8); color: #0f0; border: 1px solid #0f0; border-radius: 5px; font-weight: bold; }
+        #stats { position: absolute; top: 20px; left: 20px; color: #0f0; font-size: 1.1rem; font-weight: bold; text-shadow: 0 0 8px #0f0; z-index: 100; pointer-events: none; }
     </style>
 </head>
 <body>
     <div id="stats">IOR: <span id="ior-val">1.45</span></div>
     <div id="ui">
         <div class="slider-box"><span>IOR</span><input type="range" id="ior-slider" min="1.0" max="2.5" step="0.01" value="1.45"></div>
-        <div class="btns">
-            <button onclick="toggleShape()">▲ SHAPE</button>
-            <button onclick="toggleRotate()">🔄 ROTATE</button>
-        </div>
+        <button onclick="toggleShape()">▲ CHANGE SHAPE</button>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
 
     <script>
-        let uniforms, shapeMode = 0, isRotating = true;
+        let uniforms, shapeMode = 0;
 
-        function toggleRotate() { isRotating = !isRotating; uniforms.u_isRotating.value = isRotating ? 1.0 : 0.0; }
         function toggleShape() {
             shapeMode = 1 - shapeMode;
             uniforms.u_shapeMix.value = shapeMode;
@@ -48,25 +43,26 @@
         const handleMove = (e) => {
             const x = (e.touches ? e.touches[0].clientX : e.clientX) / window.innerWidth;
             const y = (e.touches ? e.touches[0].clientY : e.clientY) / window.innerHeight;
+            // 指の方向に光を飛ばす
             const dir = new THREE.Vector2((x - 0.5) * 2.0, (0.5 - y) * 2.0).normalize();
             if(uniforms) uniforms.u_lightDir.value.copy(dir);
         };
         window.addEventListener('mousemove', handleMove);
+        window.addEventListener('touchstart', handleMove);
         window.addEventListener('touchmove', handleMove);
 
         window.onload = () => {
             const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-            renderer.setPixelRatio(1); // 負荷軽減
+            renderer.setPixelRatio(1); 
             renderer.setSize(window.innerWidth, window.innerHeight);
             document.body.appendChild(renderer.domElement);
 
             uniforms = {
                 u_time: { value: 0 },
                 u_resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
-                u_lightDir: { value: new THREE.Vector2(0.0, -1.0) }, // 初期：真上から
+                u_lightDir: { value: new THREE.Vector2(0.0, -1.0) },
                 u_ior: { value: 1.45 },
                 u_shapeMix: { value: 0.0 },
-                u_isRotating: { value: 1.0 },
                 u_seed: { value: Math.random() * 10.0 }
             };
 
@@ -77,13 +73,12 @@
                 uniform vec2 u_lightDir;
                 uniform float u_ior;
                 uniform float u_shapeMix;
-                uniform float u_isRotating;
                 uniform float u_seed;
 
                 #define BEAM_W 0.001
                 #define EPS 0.001
 
-                // --- Helper Functions ---
+                // 物理演算用定数
                 float hash(float n) { return fract(sin(n) * 43758.5453); }
                 
                 float sdRoundedTriangle(vec2 p, float r, float f) {
@@ -99,23 +94,20 @@
                     return mix(b, a, h) - k * h * (1.0 - h);
                 }
 
-                float map(vec2 p) {
-                    float t = u_time * u_isRotating;
-                    float s = sin(t*0.4), c = cos(t*0.4);
-                    mat2 rot = mat2(c, -s, s, c);
-                    
-                    // Centered Prism
-                    float d1 = sdRoundedTriangle(p * rot, 0.45, 0.05); 
-                    
-                    // Complex Metaballs
-                    float d2 = length(p) - 0.25;
+                float sdMetaballs(vec2 p) {
+                    float d = length(p) - 0.25;
                     for(int i=0; i<5; i++) {
                         float fi = float(i);
-                        vec2 off = vec2(hash(fi+u_seed)-0.5, hash(fi*1.3+u_seed)-0.5) * 0.6;
-                        d2 = smin(d2, length(p - off) - (0.05 + hash(fi*1.7)*0.15), 0.2);
+                        vec2 off = vec2(hash(fi+u_seed)-0.5, hash(fi*1.7+u_seed)-0.5) * 0.7;
+                        d = smin(d, length(p - off) - (0.05 + hash(fi*2.1)*0.1), 0.25);
                     }
-                    d2 += (hash(p.x*10.0 + p.y*10.0 + u_seed) - 0.5) * 0.01;
-                    
+                    d += (hash(p.x*20.0 + p.y*20.0 + u_seed) - 0.5) * 0.02; // Complex surface
+                    return d;
+                }
+
+                float map(vec2 p) {
+                    float d1 = sdRoundedTriangle(p, 0.5, 0.04); 
+                    float d2 = sdMetaballs(p);
                     return mix(d1, d2, u_shapeMix);
                 }
 
@@ -130,9 +122,9 @@
                 }
 
                 vec3 get7Color(int i) {
-                    if(i == 0) return vec3(1,0,0); if(i == 1) return vec3(1,0.5,0);
-                    if(i == 2) return vec3(1,1,0); if(i == 3) return vec3(0,1,0);
-                    if(i == 4) return vec3(0,0.5,1); if(i == 5) return vec3(0,0,1);
+                    if(i==0) return vec3(1,0,0); if(i==1) return vec3(1,0.5,0);
+                    if(i==2) return vec3(1,1,0); if(i==3) return vec3(0,1,0);
+                    if(i==4) return vec3(0,0.4,1); if(i==5) return vec3(0,0,1);
                     return vec3(0.5,0,1);
                 }
 
@@ -143,7 +135,7 @@
                     vec2 rd = normalize(u_lightDir);
                     vec2 ro = rd * -1.5;
 
-                    // 1. 入射 (1回だけレイマーチ)
+                    // 1. 入射点の特定 (ループ外で1回のみ)
                     float t = 0.0;
                     for(int j=0; j<32; j++) {
                         float d = map(ro + rd * t);
@@ -154,178 +146,71 @@
                     if(t < 3.0) {
                         vec2 p1 = ro + rd * t;
                         vec2 n1 = getNormal(p1);
-                        col += vec3(smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, ro, p1)) * 0.3);
+                        
+                        // 入射光（鋭いホワイト）
+                        col += vec3(smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, ro, p1)) * 0.4);
 
-                        // 2. 出口探索 (ここも1回だけ。中央の波長で計算)
+                        // 2. 出口の特定 (中央の波長で1回のみ)
                         vec2 rd_in_mid = refract(rd, n1, 1.0/u_ior);
                         if(length(rd_in_mid)<0.1) rd_in_mid = reflect(rd, n1);
-                        float tE = 0.02;
+                        float tE = 0.05;
                         for(int j=0; j<24; j++) {
                             float d = -map(p1 + rd_in_mid * tE);
                             if(d < EPS || tE > 2.0) break;
                             tE += d;
                         }
-                        vec2 p2_base = p1 + rd_in_mid * tE;
-                        vec2 n2_base = getNormal(p2_base);
+                        vec2 p2 = p1 + rd_in_mid * tE;
+                        vec2 n2 = getNormal(p2);
 
-                        // 3. 7色分光描画 (ループ内の重い計算を全排除)
+                        // 3. 7色の分光 & 塗りつぶし (高速演算)
+                        float last_angle = 0.0;
+                        vec2 last_rd_out = vec2(0);
+
                         for(int i=0; i<7; i++) {
+                            float f = float(i)/6.0;
+                            float cur_ior = u_ior + (f - 0.5) * 0.35;
                             vec3 c1 = get7Color(i);
-                            vec3 c2 = get7Color(min(i+1, 6));
-                            float ior1 = u_ior + (float(i)/7.0 - 0.5) * 0.3;
-                            float ior2 = u_ior + (float(i+1)/7.0 - 0.5) * 0.3;
+                            
+                            // スネルの法則のみ計算
+                            vec2 rd_in = refract(rd, n1, 1.0/cur_ior);
+                            vec2 rd_out = refract(rd_in, -n2, cur_ior);
+                            if(length(rd_out) < 0.1) rd_out = reflect(rd_in, -n2);
+                            rd_out = normalize(rd_out);
 
-                            // スネルの法則のみ適用 (再探索なし)
-                            vec2 rd_in1 = refract(rd, n1, 1.0/ior1);
-                            vec2 rd_in2 = refract(rd, n1, 1.0/ior2);
-                            vec2 rd_out1 = refract(rd_in1, -n2_base, ior1);
-                            vec2 rd_out2 = refract(rd_in2, -n2_base, ior2);
+                            // 光線自体の描画 (常に鋭い)
+                            float dL = dfLine(uv, p2, p2 + rd_out * 2.0);
+                            col += c1 * smoothstep(BEAM_W+0.001, BEAM_W, dL);
 
-                            if(length(rd_out1)>0.1 && length(rd_out2)>0.1) {
-                                float dL1 = dfLine(uv, p2_base, p2_base + rd_out1 * 2.0);
-                                float dL2 = dfLine(uv, p2_base, p2_base + rd_out2 * 2.0);
+                            // 塗りつぶし (隣の光線との間)
+                            if(i > 0) {
+                                vec3 c_prev = get7Color(i-1);
+                                // 角度ベースの塗りつぶし判定
+                                float angle_uv = atan(uv.y - p2.y, uv.x - p2.x);
+                                float ang1 = atan(last_rd_out.y, last_rd_out.x);
+                                float ang2 = atan(rd_out.y, rd_out.x);
                                 
-                                float spread = length(rd_out1 - rd_out2);
-                                float energy = 1.0 / (1.0 + spread * 80.0);
-                                float filling = smoothstep(BEAM_W * 15.0, 0.0, min(dL1, dL2));
-                                
-                                col += mix(c1, c2, 0.5) * filling * energy * 1.5;
-                                col += c1 * smoothstep(BEAM_W+0.001, BEAM_W, dL1) * energy;
+                                // 角度の正規化
+                                if(ang2 < ang1) ang2 += 6.28318;
+                                if(angle_uv < ang1) angle_uv += 6.28318;
+
+                                if(angle_uv > ang1 && angle_uv < ang2 && length(uv-p2) > 0.01) {
+                                    float spread = abs(ang2 - ang1);
+                                    float energy = 1.0 / (1.0 + spread * 40.0); // 面積が広がるほど暗くなる
+                                    col += mix(c_prev, c1, (angle_uv-ang1)/spread) * 0.6 * energy;
+                                }
                             }
+                            last_rd_out = rd_out;
+                            
                             // 内部パス
-                            col += c1 * smoothstep(BEAM_W+0.001, BEAM_W, dfLine(uv, p1, p2_base)) * 0.3;
+                            col += c1 * smoothstep(BEAM_W+0.001, BEAM_W, dfLine(uv, p1, p2)) * 0.2;
                         }
                     } else {
+                        // オブジェクト外の光
                         col += vec3(smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, ro, ro + rd * 3.0)) * 0.1);
                     }
 
-                    col += smoothstep(0.003, 0.0, abs(map(uv))) * vec3(0, 1, 0.8) * 0.2;
-                    gl_FragColor = vec4(col, 1.0);
-                }
-            `;
-
-            const scene = new THREE.Scene();
-            const material = new THREE.ShaderMaterial({ uniforms, vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position, 1.0); }`, fragmentShader });
-            scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
-
-            function animate(time) {
-                uniforms.u_time.value = time * 0.001;
-                renderer.render(scene, camera);
-                requestAnimationFrame(animate);
-            }
-            animate(0);
-
-            window.addEventListener('resize', () => {
-                renderer.setSize(window.innerWidth, window.innerHeight);
-                uniforms.u_resolution.value.set(window.innerWidth, window.innerHeight);
-            });
-        };
-    </script>
-</body>
-</html>
-                    d += (hash(p.x*15.0 + p.y*15.0 + u_seed) - 0.5) * 0.015; // Surface roughness
-                    return d;
-                }
-
-                float map(vec2 p) {
-                    float d1 = sdRoundedTriangle(p, 0.45, 0.03); // 3x Centered Prism
-                    float d2 = sdMetaballs(p);
-                    return mix(d1, d2, u_shapeMix);
-                }
-
-                vec2 getNormal(vec2 p) {
-                    vec2 e = vec2(0.001, 0);
-                    return normalize(vec2(map(p+e.xy)-map(p-e.xy), map(p+e.yx)-map(p-e.yx)));
-                }
-
-                float dfLine(vec2 p, vec2 a, vec2 b) {
-                    vec2 pa = p - a, ba = b - a;
-                    return length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0));
-                }
-
-                vec3 get7Color(int i) {
-                    if(i == 0) return vec3(1,0,0); if(i == 1) return vec3(1,0.5,0);
-                    if(i == 2) return vec3(1,1,0); if(i == 3) return vec3(0,1,0);
-                    if(i == 4) return vec3(0,0.5,1); if(i == 5) return vec3(0,0,1);
-                    return vec3(0.5,0,1);
-                }
-
-                void main() {
-                    vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / min(u_resolution.y, u_resolution.x);
-                    vec3 col = vec3(0.0);
-
-                    vec2 rd = normalize(u_lightDir);
-                    vec2 ro = rd * -1.5;
-
-                    // 1. 入射 (1回だけ計算)
-                    float t = 0.0;
-                    for(int j=0; j<32; j++) {
-                        float d = map(ro + rd * t);
-                        if(d < 0.001 || t > 3.0) break;
-                        t += d;
-                    }
-
-                    if(t < 3.0) {
-                        vec2 p1 = ro + rd * t;
-                        vec2 n1 = getNormal(p1);
-                        
-                        // 入射光（鋭いホワイト）
-                        col += vec3(smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, ro, p1)) * 0.5);
-
-                        // --- 物理ベース分光ループ ---
-                        for(int i=0; i<SAMPLES; i++) {
-                            vec3 c1 = get7Color(i);
-                            vec3 c2 = get7Color(min(i+1, 6));
-                            float ior1 = u_ior + (float(i)/7.0 - 0.5) * 0.35;
-                            float ior2 = u_ior + (float(i+1)/7.0 - 0.5) * 0.35;
-
-                            // 内部屈折ベクトル
-                            vec2 rd_in1 = refract(rd, n1, 1.0/ior1);
-                            vec2 rd_in2 = refract(rd, n1, 1.0/ior2);
-                            if(length(rd_in1)<0.1) rd_in1 = reflect(rd, n1);
-                            if(length(rd_in2)<0.1) rd_in2 = reflect(rd, n1);
-
-                            // 出口の特定 (高速化のためステップ短縮)
-                            float tE1=0.02, tE2=0.02;
-                            for(int j=0; j<16; j++) {
-                                tE1 -= map(p1 + rd_in1 * tE1);
-                                tE2 -= map(p1 + rd_in2 * tE2);
-                            }
-                            vec2 p2_1 = p1 + rd_in1 * tE1;
-                            vec2 p2_2 = p1 + rd_in2 * tE2;
-
-                            // 内部パス
-                            col += c1 * smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, p1, p2_1)) * 0.4;
-
-                            // 出射屈折
-                            vec2 n2_1 = getNormal(p2_1);
-                            vec2 n2_2 = getNormal(p2_2);
-                            vec2 rO1 = refract(rd_in1, -n2_1, ior1);
-                            vec2 rO2 = refract(rd_in2, -n2_2, ior2);
-
-                            if(length(rO1)>0.1 && length(rO2)>0.1) {
-                                float dL1 = dfLine(uv, p2_1, p2_1 + rO1*2.0);
-                                float dL2 = dfLine(uv, p2_2, p2_2 + rO2*2.0);
-                                
-                                // 角度の広がりによるエネルギー減衰
-                                float spread = length(rO1 - rO2);
-                                float energy = 1.0 / (1.0 + spread * 60.0);
-                                
-                                // 線形補間塗りつぶし (min距離で領域判定)
-                                float filling = smoothstep(BEAM_W*12.0, 0.0, min(dL1, dL2));
-                                col += mix(c1, c2, 0.5) * filling * energy * 1.8;
-                                
-                                // 境界のシャープな光線
-                                col += c1 * smoothstep(BEAM_W+0.002, BEAM_W, dL1) * energy;
-                            }
-                        }
-                    } else {
-                        // オブジェクトを外れた光
-                        col += vec3(smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, ro, ro + rd * 3.0)) * 0.2);
-                    }
-
-                    // 輪郭のアンチエイリアス
-                    col += smoothstep(0.003, 0.0, abs(map(uv))) * vec3(0, 1, 0.8) * 0.2;
+                    // 輪郭
+                    col += smoothstep(0.003, 0.0, abs(map(uv))) * vec3(0, 1, 0.6) * 0.2;
                     gl_FragColor = vec4(col, 1.0);
                 }
             `;
@@ -349,210 +234,3 @@
     </script>
 </body>
 </html>
-                    d += (hash(p.x*10.0+p.y*10.0+u_seed)-0.5) * 0.01; // Surface Noise
-                    return d;
-                }
-
-                float map(vec2 p) {
-                    float d1 = sdRoundedTriangle(p, 0.45, 0.05); // Centered Prism
-                    float d2 = sdMetaballs(p);
-                    return mix(d1, d2, u_shapeMix);
-                }
-
-                vec2 getNormal(vec2 p) {
-                    vec2 e = vec2(0.005, 0);
-                    return normalize(vec2(map(p+e.xy)-map(p-e.xy), map(p+e.yx)-map(p-e.yx)));
-                }
-
-                float dfLine(vec2 p, vec2 a, vec2 b) {
-                    vec2 pa = p - a, ba = b - a;
-                    return length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0));
-                }
-
-                vec3 get7Color(int i) {
-                    if(i == 0) return vec3(1,0,0); if(i == 1) return vec3(1,0.5,0);
-                    if(i == 2) return vec3(1,1,0); if(i == 3) return vec3(0,1,0);
-                    if(i == 4) return vec3(0,0.5,1); if(i == 5) return vec3(0,0,1);
-                    return vec3(0.5,0,1);
-                }
-
-                void main() {
-                    vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / min(u_resolution.y, u_resolution.x);
-                    vec3 col = vec3(0.01); // 動作確認用の微かな背景
-
-                    vec2 rd = normalize(u_lightDir);
-                    vec2 ro = rd * -1.2;
-
-                    // 1. 入射
-                    float t = 0.0;
-                    for(int j=0; j<24; j++) {
-                        float d = map(ro + rd * t);
-                        if(d < 0.001 || t > 2.5) break;
-                        t += d;
-                    }
-
-                    if(t < 2.5) {
-                        vec2 p1 = ro + rd * t;
-                        vec2 n1 = getNormal(p1);
-                        col += vec3(smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, ro, p1)) * 0.5);
-
-                        // 2. 7色分光 & 線形補間
-                        for(int i=0; i<7; i++) {
-                            vec3 c1 = get7Color(i);
-                            vec3 c2 = get7Color(min(i+1, 6));
-                            float ior1 = u_ior + (float(i)/7.0 - 0.5) * 0.3;
-                            float ior2 = u_ior + (float(i+1)/7.0 - 0.5) * 0.3;
-
-                            vec2 rd_in1 = refract(rd, n1, 1.0/ior1);
-                            vec2 rd_in2 = refract(rd, n1, 1.0/ior2);
-                            if(length(rd_in1)<0.1) rd_in1 = reflect(rd, n1);
-                            if(length(rd_in2)<0.1) rd_in2 = reflect(rd, n1);
-
-                            // 出口探索 (高速化のためステップ短縮)
-                            float tE1=0.02, tE2=0.02;
-                            for(int j=0; j<12; j++) {
-                                tE1 -= map(p1 + rd_in1 * tE1);
-                                tE2 -= map(p1 + rd_in2 * tE2);
-                            }
-                            vec2 p2_1 = p1 + rd_in1 * tE1;
-                            vec2 p2_2 = p1 + rd_in2 * tE2;
-
-                            // 内部パス
-                            col += c1 * smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, p1, p2_1));
-
-                            // 出射
-                            vec2 n2_1 = getNormal(p2_1);
-                            vec2 n2_2 = getNormal(p2_2);
-                            vec2 rO1 = refract(rd_in1, -n2_1, ior1);
-                            vec2 rO2 = refract(rd_in2, -n2_2, ior2);
-
-                            if(length(rO1)>0.1 && length(rO2)>0.1) {
-                                float dL1 = dfLine(uv, p2_1, p2_1 + rO1*2.0);
-                                float dL2 = dfLine(uv, p2_2, p2_2 + rO2*2.0);
-                                
-                                // 線形補間塗りつぶし & 角度減衰
-                                float spread = length(rO1 - rO2);
-                                float atten = 1.0 / (1.0 + spread * 20.0);
-                                float fill = smoothstep(BEAM_W*2.0, 0.0, min(dL1, dL2));
-                                col += mix(c1, c2, 0.5) * fill * atten;
-                            }
-                        }
-                    } else {
-                        col += vec3(smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, ro, ro + rd * 3.0)) * 0.2);
-                    }
-
-                    col += smoothstep(0.003, 0.0, abs(map(uv))) * 0.2; // 輪郭
-                    gl_FragColor = vec4(col, 1.0);
-                }
-            `;
-
-            const scene = new THREE.Scene();
-            const material = new THREE.ShaderMaterial({ uniforms, vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position, 1.0); }`, fragmentShader });
-            scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
-
-            function animate(time) {
-                uniforms.u_time.value = time * 0.001;
-                renderer.render(scene, camera);
-                requestAnimationFrame(animate);
-            }
-            animate(0);
-
-            window.addEventListener('resize', () => {
-                renderer.setSize(window.innerWidth, window.innerHeight);
-                uniforms.u_resolution.value.set(window.innerWidth, window.innerHeight);
-            });
-        };
-    </script>
-</body>
-</html>
-                    if(i == 0) return vec3(1.0, 0.1, 0.1); // 赤
-                    if(i == 1) return vec3(1.0, 0.5, 0.0); // 橙
-                    if(i == 2) return vec3(1.0, 1.0, 0.1); // 黄
-                    if(i == 3) return vec3(0.1, 1.0, 0.1); // 緑
-                    if(i == 4) return vec3(0.1, 0.5, 1.0); // 青
-                    if(i == 5) return vec3(0.3, 0.1, 0.8); // 藍
-                    return vec3(0.6, 0.1, 1.0);           // 紫
-                }
-
-                // 2D Noise
-                float noise(vec2 p) {
-                    return fract(sin(dot(p + u_noiseSeed, vec2(12.9898, 78.233))) * 43758.5453);
-                }
-
-                // フィレット付き三角形SDF
-                float sdRoundedTriangle(vec2 p, float r, float f) {
-                    const float k = sqrt(3.0);
-                    p.x = abs(p.x) - r; p.y = p.y + r/k;
-                    if( p.x+k*p.y>0.0 ) p = vec2(p.x-k*p.y,-k*p.x-p.y)/2.0;
-                    p.x -= clamp( p.x, -2.0*r, 0.0 );
-                    return -length(p)*sign(p.y) - f;
-                }
-                
-                float sdCircle(vec2 p, float r) { return length(p) - r; }
-                float smin(float a, float b, float k) {
-                    float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
-                    return mix(b, a, h) - k * h * (1.0 - h);
-                }
-
-                // メタボールの界面定義（ランダム・複雑）
-                float sdMetaballs(vec2 p) {
-                    // 背骨 Noise
-                    float d = sdCircle(p, 0.4); 
-                    // 5つの大きな円
-                    d = smin(d, sdCircle(p - vec2(0.2, 0.1), 0.1), 0.2);
-                    d = smin(d, sdCircle(p - vec2(-0.2, -0.1), 0.15), 0.2);
-                    d = smin(d, sdCircle(p - vec2(0.0, 0.3), 0.1), 0.2);
-                    d = smin(d, sdCircle(p - vec2(0.3, -0.3), 0.1), 0.2);
-                    d = smin(d, sdCircle(p - vec2(-0.3, 0.3), 0.1), 0.2);
-                    // 小さな円をばらまく
-                    d = smin(d, sdCircle(p - vec2(noise(p)*0.4 - 0.2, noise(p+10.0)*0.4 - 0.2), 0.05), 0.1);
-                    d = smin(d, sdCircle(p - vec2(noise(p+20.0)*0.4 - 0.2, noise(p+30.0)*0.4 - 0.2), 0.05), 0.1);
-                    // 界面にノイズを加算して複雑化
-                    d += (noise(p * 20.0) - 0.5) * smoothstep(0.01, 0.0, abs(d)) * 0.1;
-                    return d;
-                }
-
-                float map(vec2 p) {
-                    // 回転停止、中央固定、大型化
-                    mat2 rot = mat2(1, 0, 0, 1);
-                    float d1 = sdRoundedTriangle(p * rot, 0.45, 0.05); // 大型化・中央固定
-                    float d2 = sdMetaballs(p * rot); // 大型化・中央固定
-                    return mix(d1, d2, u_shapeMix);
-                }
-
-                vec2 getNormal(vec2 p) {
-                    vec2 e = vec2(0.001, 0);
-                    return normalize(vec2(map(p+e.xy)-map(p-e.xy), map(p+e.yx)-map(p-e.yx)));
-                }
-
-                float aaLine(vec2 p, vec2 a, vec2 b, float w) {
-                    vec2 pa = p - a, ba = b - a;
-                    float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
-                    float d = length(pa - ba * h);
-                    return smoothstep(w + 0.002, w, d); // 分析的AA
-                }
-
-                void main() {
-                    vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / min(u_resolution.y, u_resolution.x);
-                    vec3 col = vec3(0.0);
-                    
-                    vec2 rd = normalize(u_lightDir);
-                    vec2 ro = rd * -1.5;
-
-                    // --- [Step 1] ループ前の共通計算 (入射点の特定) ---
-                    float tEntry = 0.0;
-                    for(int j=0; j<32; j++) {
-                        float d = map(ro + rd * tEntry);
-                        if(d < EPS || tEntry > MAX_DIST) break;
-                        tEntry += d;
-                    }
-
-                    if(tEntry < MAX_DIST) {
-                        vec2 p1 = ro + rd * tEntry;
-                        vec2 n1 = getNormal(p1);
-                        
-                        // 入射光（鋭いホワイトレーザー）
-                        col += vec3(aaLine(uv, ro, p1, BEAM_W) * 0.5);
-
-                        // --- [Step 2] 分光ループ (補間塗りつぶし) ---
-                        // ループ回数を7回
