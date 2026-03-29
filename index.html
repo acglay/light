@@ -2,185 +2,219 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>Raymarching Dispersion Sandbox</title>
+    <title>Prism Sandbox - Layout Fixed</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; }
-        canvas { display: block; }
+        /* レイアウトの強制リセット */
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #1a1a1a; /* キャンバスがない時に見える色 */
+        }
+
+        /* キャンバスを画面いっぱいに固定 */
+        #canvas-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 1;
+        }
+
+        /* UI操作パネルを最前面に */
+        #ui-layer {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+            display: flex;
+            gap: 15px;
+        }
+
+        button {
+            padding: 12px 24px;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            cursor: pointer;
+            backdrop-filter: blur(5px);
+            font-weight: bold;
+            border-radius: 4px;
+        }
+
+        button:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        #debug-info {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            color: #0f0;
+            font-family: monospace;
+            z-index: 100;
+            pointer-events: none;
+            background: rgba(0,0,0,0.5);
+        }
     </style>
 </head>
 <body>
-    <script type="importmap">
-        {
-            "imports": {
-                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-            }
+
+    <div id="ui-layer">
+        <button onclick="changeShape(0)">▲ プリズム形状</button>
+        <button onclick="changeShape(1)">● メタボール形状</button>
+    </div>
+
+    <div id="debug-info">Status: Initializing...</div>
+
+    <div id="canvas-container"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
+
+    <script>
+        const debug = document.getElementById('debug-info');
+        let uniforms;
+
+        function changeShape(val) {
+            if(uniforms) uniforms.u_shapeMix.value = val;
+            debug.innerText = "Status: Shape set to " + (val === 0 ? "Prism" : "Metaball");
         }
-    </script>
 
-    <script type="module">
-        import * as THREE from 'three';
-        import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
+        window.onload = () => {
+            const container = document.getElementById('canvas-container');
+            const width = window.innerWidth;
+            const height = window.innerHeight;
 
-        // --- Shader Source ---
-        const vertexShader = `
-            varying vec2 vUv;
-            void main() {
-                vUv = uv;
-                gl_Position = vec4(position, 1.0);
-            }
-        `;
+            // 1. シーンとレンダラー
+            const scene = new THREE.Scene();
+            const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+            const renderer = new THREE.WebGLRenderer({ antialias: true });
+            
+            renderer.setSize(width, height);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            container.appendChild(renderer.domElement);
 
-        const fragmentShader = `
-            uniform vec2 u_resolution;
-            uniform float u_time;
-            uniform float u_ior;
-            uniform float u_dispersion;
-            uniform float u_smoothness;
-            uniform float u_shapeMix; // 0: Box/Prism, 1: Metaballs
-            varying vec2 vUv;
+            // 2. ユニフォーム設定
+            uniforms = {
+                u_time: { value: 0 },
+                u_resolution: { value: new THREE.Vector2(width, height) },
+                u_ior: { value: 1.45 },
+                u_dispersion: { value: 0.12 },
+                u_shapeMix: { value: 0.0 }
+            };
 
-            const int MAX_STEPS = 100;
-            const float SURF_DIST = 0.001;
-            const float MAX_DIST = 20.0;
-
-            // --- SDF Functions ---
-            float sdSphere(vec3 p, float s) { return length(p) - s; }
-            float sdBox(vec3 p, vec3 b) {
-                vec3 q = abs(p) - b;
-                return length(max(q,0.0)) + min(max(q.x,max(q.y,q.z)),0.0);
-            }
-
-            // Polynomial smooth min for metaballs
-            float smin(float a, float b, float k) {
-                float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
-                return mix(b, a, h) - k * h * (1.0 - h);
-            }
-
-            float getDist(vec3 p) {
-                // Rotation for showcase
-                float s = sin(u_time * 0.5), c = cos(u_time * 0.5);
-                mat2 rot = mat2(c, -s, s, c);
-                p.xz *= rot;
-                p.xy *= rot;
-
-                // Prism Shape (Box)
-                float box = sdBox(p, vec3(0.6));
-
-                // Metaball Shape
-                float m1 = sdSphere(p - vec3(sin(u_time)*0.5, cos(u_time*0.7)*0.5, 0.), 0.4);
-                float m2 = sdSphere(p - vec3(cos(u_time*0.8)*0.5, sin(u_time)*0.5, 0.), 0.4);
-                float metaballs = smin(m1, m2, u_smoothness);
-
-                return mix(box, metaballs, u_shapeMix);
-            }
-
-            vec3 getNormal(vec3 p) {
-                vec2 e = vec2(0.01, 0);
-                return normalize(vec3(
-                    getDist(p + e.xyy) - getDist(p - e.xyy),
-                    getDist(p + e.yxy) - getDist(p - e.yxy),
-                    getDist(p + e.yyx) - getDist(p - e.yyx)
-                ));
-            }
-
-            // Simple Raymarch
-            float rayMarch(vec3 ro, vec3 rd) {
-                float dO = 0.0;
-                for(int i=0; i<MAX_STEPS; i++) {
-                    vec3 p = ro + rd * dO;
-                    float dS = getDist(p);
-                    dO += dS;
-                    if(dO > MAX_DIST || abs(dS) < SURF_DIST) break;
+            // 3. シェーダーコード
+            const vertexShader = `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = vec4(position, 1.0);
                 }
-                return dO;
-            }
+            `;
 
-            void main() {
-                vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / u_resolution.y;
-                vec3 ro = vec4(0, 0, -3, 1).xyz;
-                vec3 rd = normalize(vec3(uv, 1.2));
-                vec3 color = vec3(0.05); // Background
+            const fragmentShader = `
+                precision highp float;
+                uniform vec2 u_resolution;
+                uniform float u_time;
+                uniform float u_ior;
+                uniform float u_dispersion;
+                uniform float u_shapeMix;
+                varying vec2 vUv;
 
-                float d = rayMarch(ro, rd);
-
-                if(d < MAX_DIST) {
-                    vec3 p = ro + rd * d;
-                    vec3 n = getNormal(p);
-                    
-                    // Dispersion Logic: 
-                    // Calculate refraction for RGB channels separately
-                    vec3 col;
-                    float iorR = u_ior + u_dispersion;
-                    float iorG = u_ior;
-                    float iorB = u_ior - u_dispersion;
-
-                    vec3 refractR = refract(rd, n, 1.0/iorR);
-                    vec3 refractG = refract(rd, n, 1.0/iorG);
-                    vec3 refractB = refract(rd, n, 1.0/iorB);
-
-                    // Simplistic environment mapping for refraction look
-                    col.r = texture2D(u_resolution, refractR.xy).r + max(0.0, refractR.z);
-                    col.g = texture2D(u_resolution, refractG.xy).g + max(0.0, refractG.z);
-                    col.b = texture2D(u_resolution, refractB.xy).b + max(0.0, refractB.z);
-                    
-                    // Add some Fresnel and Lighting
-                    float fresnel = pow(1.0 + dot(rd, n), 3.0);
-                    color = col + fresnel * 0.5;
+                // 形状：三角柱
+                float sdTriPrism(vec3 p, vec2 h) {
+                    vec3 q = abs(p);
+                    return max(q.z-h.y, max(q.x*0.866025+p.y*0.5, -p.y)-h.x*0.5);
+                }
+                // 形状：球
+                float sdSphere(vec3 p, float s) { return length(p) - s; }
+                // スムーズ結合
+                float smin(float a, float b, float k) {
+                    float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+                    return mix(b, a, h) - k * h * (1.0 - h);
                 }
 
-                gl_FragColor = vec4(color, 1.0);
+                float getDist(vec3 p) {
+                    float s = sin(u_time * 0.5), c = cos(u_time * 0.5);
+                    p.xz *= mat2(c, -s, s, c);
+                    p.yz *= mat2(c, -s, s, c);
+
+                    float d1 = sdTriPrism(p, vec2(0.6, 0.4));
+                    float m1 = sdSphere(p - vec3(sin(u_time)*0.5, 0, 0), 0.35);
+                    float m2 = sdSphere(p - vec3(cos(u_time)*0.5, 0, 0), 0.35);
+                    float d2 = smin(m1, m2, 0.4);
+                    
+                    return mix(d1, d2, u_shapeMix);
+                }
+
+                vec3 getNormal(vec3 p) {
+                    vec2 e = vec2(0.001, 0);
+                    return normalize(vec3(getDist(p+e.xyy)-getDist(p-e.xyy), getDist(p+e.yxy)-getDist(p-e.yxy), getDist(p+e.yyx)-getDist(p-e.yyx)));
+                }
+
+                // 背景色（屈折確認用のグリッド）
+                vec3 getBg(vec3 rd) {
+                    float grid = smoothstep(0.7, 0.8, sin(rd.x*15.0)*sin(rd.y*15.0));
+                    return mix(vec3(0.05, 0.05, 0.1), vec3(0.1, 0.4, 0.8), grid);
+                }
+
+                void main() {
+                    vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / min(u_resolution.y, u_resolution.x);
+                    vec3 ro = vec3(0, 0, -2.5);
+                    vec3 rd = normalize(vec3(uv, 1.2));
+                    
+                    float dO = 0.0;
+                    for(int i=0; i<80; i++) {
+                        float dS = getDist(ro + rd * dO);
+                        dO += dS;
+                        if(dS < 0.001 || dO > 10.0) break;
+                    }
+
+                    vec3 color = getBg(rd);
+
+                    if(dO < 10.0) {
+                        vec3 p = ro + rd * dO;
+                        vec3 n = getNormal(p);
+                        
+                        // 分光
+                        vec3 refr;
+                        refr.r = getBg(refract(rd, n, 1.0/(u_ior + u_dispersion))).r;
+                        refr.g = getBg(refract(rd, n, 1.0/u_ior)).g;
+                        refr.b = getBg(refract(rd, n, 1.0/(u_ior - u_dispersion))).b;
+                        
+                        float fres = pow(1.0 + dot(rd, n), 3.0);
+                        color = refr + fres * 0.4;
+                    }
+                    gl_FragColor = vec4(color, 1.0);
+                }
+            `;
+
+            // 4. メッシュ作成
+            const material = new THREE.ShaderMaterial({ uniforms, vertexShader, fragmentShader });
+            const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
+            scene.add(mesh);
+
+            // 5. ループ
+            function animate(time) {
+                uniforms.u_time.value = time * 0.001;
+                renderer.render(scene, camera);
+                requestAnimationFrame(animate);
             }
-        `;
+            animate(0);
 
-        // --- Three.js Setup ---
-        const scene = new THREE.Scene();
-        const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
-        const renderer = new THREE.WebGLRenderer();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        document.body.appendChild(renderer.domElement);
+            debug.innerText = "Status: Running (Resolution: " + width + "x" + height + ")";
 
-        const geometry = new THREE.PlaneGeometry(2, 2);
-        const uniforms = {
-            u_time: { value: 0 },
-            u_resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
-            u_ior: { value: 1.45 },
-            u_dispersion: { value: 0.05 },
-            u_smoothness: { value: 0.4 },
-            u_shapeMix: { value: 0.0 }
+            window.addEventListener('resize', () => {
+                const w = window.innerWidth;
+                const h = window.innerHeight;
+                renderer.setSize(w, h);
+                uniforms.u_resolution.value.set(w, h);
+                debug.innerText = "Status: Resized (" + w + "x" + h + ")";
+            });
         };
-
-        const material = new THREE.ShaderMaterial({
-            uniforms,
-            vertexShader,
-            fragmentShader
-        });
-
-        const mesh = new THREE.Mesh(geometry, material);
-        scene.add(mesh);
-        camera.position.z = 1;
-
-        // --- GUI ---
-        const gui = new GUI();
-        gui.add(uniforms.u_ior, 'value', 1.0, 2.5).name('屈折率 (IOR)');
-        gui.add(uniforms.u_dispersion, 'value', 0.0, 0.2).name('分光強度');
-        gui.add(uniforms.u_smoothness, 'value', 0.1, 1.0).name('メタボール粘度');
-        gui.add(uniforms.u_shapeMix, 'value', 0, 1).step(1).name('形状切替 (0:Box 1:Meta)');
-
-        // --- Animation Loop ---
-        function animate(time) {
-            uniforms.u_time.value = time * 0.001;
-            renderer.render(scene, camera);
-            requestAnimationFrame(animate);
-        }
-
-        window.addEventListener('resize', () => {
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            uniforms.u_resolution.value.set(window.innerWidth, window.innerHeight);
-        });
-
-        animate();
     </script>
 </body>
 </html>
-
