@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Ozzy TA Edition v7.3</title>
+    <title>Ozzy TA v7.4 - SILVER BULLET</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
         body { width: 100vw; height: 100vh; overflow: hidden; background-color: #000; font-family: monospace; }
@@ -19,7 +19,7 @@
 </head>
 <body>
     <div id="stats">
-        VERSION: 7.3 (STABLE CENTER)<br>
+        VERSION: 7.4 (SILVER BULLET)<br>
         IOR: <span id="v-ior">1.45</span><br>
         BOUNCES: <span id="v-bounce">3</span><br>
         RAYS: <span id="v-rays">3</span>
@@ -41,14 +41,14 @@
     <script>
         let uniforms, canvas;
         
-        // 座標計算を NDC (-1.0 to 1.0) に固定
+        // 座標計算を Vertex Shader と 100% 同期
         const toWorld = (clientX, clientY) => {
             const rect = canvas.getBoundingClientRect();
             const aspect = rect.width / rect.height;
-            const x = (clientX - rect.left - rect.width * 0.5) / (rect.width * 0.5);
-            const y = (rect.height * 0.5 - (clientY - rect.top)) / (rect.height * 0.5);
-            // Shader側の補正に合わせる
-            return new THREE.Vector2(x * (aspect > 1 ? aspect : 1), y / (aspect > 1 ? 1 : aspect));
+            let x = (clientX - rect.left - rect.width * 0.5) / (rect.width * 0.5);
+            let y = (rect.height * 0.5 - (clientY - rect.top)) / (rect.height * 0.5);
+            if (aspect > 1.0) x *= aspect; else y /= aspect;
+            return new THREE.Vector2(x, y);
         };
 
         function toggleShape() {
@@ -68,7 +68,7 @@
             canvas = document.getElementById('gl-canvas');
             const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); // パフォーマンス重視
 
             uniforms = {
                 u_aspect: { value: window.innerWidth / window.innerHeight },
@@ -100,6 +100,149 @@
             const vertexShader = `
                 varying vec2 vUv;
                 uniform float u_aspect;
+                void main() {
+                    vUv = (uv - 0.5) * 2.0;
+                    if(u_aspect > 1.0) vUv.x *= u_aspect;
+                    else vUv.y /= u_aspect;
+                    gl_Position = vec4(position, 1.0);
+                }
+            `;
+
+            const fragmentShader = `
+                precision highp float;
+                varying vec2 vUv;
+                uniform vec2 u_rayOrigin, u_rayDir;
+                uniform float u_ior, u_colorCount, u_maxBounces, u_shapeMix, u_seed;
+                #define EPS 0.002
+                #define BEAM_W 0.001
+
+                float hash(vec2 p) { return fract(sin(dot(p, vec2(12.98, 78.23))) * 43758.54); }
+                float smin(float a, float b, float k) {
+                    float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+                    return mix(b, a, h) - k * h * (1.0 - h);
+                }
+                
+                float sdRoundedTriangle(vec2 p, float r, float f) {
+                    const float k = sqrt(3.0);
+                    p.x = abs(p.x) - r; p.y = p.y + r/k;
+                    if( p.x+k*p.y>0.0 ) p = vec2(p.x-k*p.y,-k*p.x-p.y)/2.0;
+                    p.x -= clamp( p.x, -2.0*r, 0.0 );
+                    return -length(p)*sign(p.y) - f;
+                }
+
+                float map(vec2 p) {
+                    float d1 = sdRoundedTriangle(p, 0.42, 0.03); 
+                    float d2 = length(p) - 0.22;
+                    for(int i=0; i<3; i++) {
+                        float fi = float(i);
+                        vec2 s = vec2(hash(vec2(fi, u_seed))-0.5, hash(vec2(fi+1.3, u_seed))-0.5) * 0.7;
+                        d2 = smin(d2, length(p - s) - 0.1, 0.3);
+                    }
+                    return mix(d1, d2, u_shapeMix);
+                }
+
+                vec2 getNormal(vec2 p) {
+                    vec2 e = vec2(EPS, 0);
+                    return normalize(vec2(map(p+e.xy)-map(p-e.xy), map(p+e.yx)-map(p-e.yx)));
+                }
+
+                float dfLine(vec2 p, vec2 a, vec2 b) {
+                    vec2 pa = p - a, ba = b - a;
+                    return length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0));
+                }
+
+                vec3 getOzzyColor(int i, float total) {
+                    if(total <= 3.0) {
+                        if(i==0) return vec3(1,0,0); if(i==1) return vec3(0,1,0); return vec3(0,0,1);
+                    }
+                    if(total <= 5.0) {
+                        if(i==0) return vec3(1,0,0); if(i==1) return vec3(1,1,0); 
+                        if(i==2) return vec3(0,1,0); if(i==3) return vec3(0,1,1); return vec3(0,0,1);
+                    }
+                    if(total <= 7.0) {
+                        if(i==0) return vec3(1,0,0); if(i==1) return vec3(1,0.5,0); if(i==2) return vec3(1,1,0);
+                        if(i==3) return vec3(0,1,0); if(i==4) return vec3(0,0,1); if(i==5) return vec3(0.3,0,0.5); return vec3(0.5,0,1);
+                    }
+                    float f = float(i)/max(1.0, total-1.0);
+                    return 0.5 + 0.5 * cos(6.28318 * (vec3(1,1,1) * f + vec3(0.0, 0.33, 0.67)));
+                }
+
+                void main() {
+                    vec2 uv = vUv;
+                    vec3 col = vec3(0.0);
+                    float d_glass = map(uv);
+                    if(d_glass < 0.0) col += vec3(0.04, 0.08, 0.12);
+
+                    vec2 rd = normalize(u_rayDir);
+                    vec2 ro = u_rayOrigin;
+
+                    // --- 1st Entry (Optimized: 1st march is outside the wavelength loop) ---
+                    float t = 0.0;
+                    for(int j=0; j<20; j++) {
+                        float d = map(ro + rd * t);
+                        if(d < EPS || t > 3.0) break;
+                        t += d;
+                    }
+
+                    if(t < 3.0) {
+                        vec2 p1 = ro + rd * t;
+                        vec2 n1 = getNormal(p1);
+                        col += vec3(smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, ro, p1)) * 0.3);
+
+                        int count = int(u_colorCount);
+                        for(int i=0; i<12; i++) {
+                            if(i >= count) break;
+                            vec3 waveCol = getOzzyColor(i, u_colorCount);
+                            float curIOR = u_ior + (float(i)/max(1.0, u_colorCount-1.0) - 0.5) * 0.35;
+                            
+                            vec2 rP = p1;
+                            vec2 rD = refract(rd, n1, 1.0/curIOR);
+                            if(length(rD) < 0.1) rD = reflect(rd, n1);
+
+                            // --- Bounces (Max 5 for performance) ---
+                            for(int b=0; b < 5; b++) {
+                                if(float(b) >= u_maxBounces) break;
+                                float tE = 0.05;
+                                // JFA-inspired Adaptive Step Sphere Tracing (Reduced steps)
+                                for(int s=0; s<8; s++) {
+                                    float d = -map(rP + rD * tE);
+                                    if(d < EPS || tE > 1.5) break;
+                                    tE += d;
+                                }
+                                vec2 p2 = rP + rD * tE;
+                                vec2 n2 = getNormal(p2);
+                                col += waveCol * smoothstep(BEAM_W+0.001, BEAM_W, dfLine(uv, rP, p2)) * 0.2;
+                                
+                                vec2 rO = refract(rD, -n2, curIOR);
+                                if(length(rO) < 0.1) {
+                                    rD = reflect(rD, -n2); rP = p2;
+                                } else {
+                                    col += waveCol * smoothstep(BEAM_W+0.001, BEAM_W, dfLine(uv, p2, p2 + rO * 3.5));
+                                    break;
+                                }
+                            }
+                        }
+                    } else {
+                        col += vec3(smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, ro, ro + rd * 5.0)) * 0.1);
+                    }
+                    gl_FragColor = vec4(col, 1.0);
+                }
+            `;
+
+            const scene = new THREE.Scene();
+            scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({ uniforms, vertexShader, fragmentShader })));
+            const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+            function animate() { renderer.render(scene, camera); requestAnimationFrame(animate); }
+            animate();
+            
+            window.addEventListener('resize', () => {
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                uniforms.u_aspect.value = window.innerWidth / window.innerHeight;
+            });
+        };
+    </script>
+</body>
+</html>
                 void main() {
                     vUv = (uv - 0.5) * 2.0;
                     if(u_aspect > 1.0) vUv.x *= u_aspect;
