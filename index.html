@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Ozzy TA Edition v7.2</title>
+    <title>Ozzy TA Edition v7.3</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
         body { width: 100vw; height: 100vh; overflow: hidden; background-color: #000; font-family: monospace; }
@@ -13,12 +13,13 @@
         .slider-box span { min-width: 55px; font-size: 9px; font-weight: bold; }
         input[type=range] { flex-grow: 1; accent-color: #0f0; cursor: pointer; }
         #stats { position: absolute; top: 20px; left: 20px; color: #0f0; font-size: 11px; font-weight: bold; z-index: 10; pointer-events: none; text-shadow: 0 0 5px #000; line-height: 1.4; }
-        button { padding: 8px 14px; background: #000; color: #0f0; border: 1px solid #0f0; border-radius: 4px; pointer-events: auto; font-family: inherit; font-size: 10px; }
+        .btns { display: flex; gap: 6px; pointer-events: auto; }
+        button { padding: 10px 15px; background: #000; color: #0f0; border: 1px solid #0f0; border-radius: 4px; pointer-events: auto; font-family: inherit; font-size: 10px; font-weight: bold; }
     </style>
 </head>
 <body>
     <div id="stats">
-        VERSION: 7.2 (STABLE CENTER)<br>
+        VERSION: 7.3 (STABLE CENTER)<br>
         IOR: <span id="v-ior">1.45</span><br>
         BOUNCES: <span id="v-bounce">3</span><br>
         RAYS: <span id="v-rays">3</span>
@@ -27,7 +28,10 @@
         <div class="slider-box"><span>BOUNCE</span><input type="range" id="bounce-s" min="1" max="10" step="1" value="3"></div>
         <div class="slider-box"><span>RAYS</span><input type="range" id="rays-s" min="1" max="12" step="1" value="3"></div>
         <div class="slider-box"><span>IOR</span><input type="range" id="ior-s" min="1.0" max="2.5" step="0.01" value="1.45"></div>
-        <button onclick="resetAll()">RESET ALL</button>
+        <div class="btns">
+            <button onclick="toggleShape()">CHANGE SHAPE</button>
+            <button onclick="resetAll()">RESET ALL</button>
+        </div>
     </div>
 
     <canvas id="gl-canvas"></canvas>
@@ -37,46 +41,51 @@
     <script>
         let uniforms, canvas;
         
+        // 座標計算を NDC (-1.0 to 1.0) に固定
         const toWorld = (clientX, clientY) => {
             const rect = canvas.getBoundingClientRect();
-            const minRes = Math.min(rect.width, rect.height);
-            // 数学的に完璧な中央揃え
-            const x = (clientX - rect.left - rect.width * 0.5) / minRes;
-            const y = (rect.height * 0.5 - (clientY - rect.top)) / minRes;
-            return new THREE.Vector2(x, y);
+            const aspect = rect.width / rect.height;
+            const x = (clientX - rect.left - rect.width * 0.5) / (rect.width * 0.5);
+            const y = (rect.height * 0.5 - (clientY - rect.top)) / (rect.height * 0.5);
+            // Shader側の補正に合わせる
+            return new THREE.Vector2(x * (aspect > 1 ? aspect : 1), y / (aspect > 1 ? 1 : aspect));
         };
+
+        function toggleShape() {
+            uniforms.u_shapeMix.value = 1.0 - uniforms.u_shapeMix.value;
+            uniforms.u_seed.value = Math.random() * 100.0;
+        }
 
         function resetAll() {
             uniforms.u_ior.value = 1.45; uniforms.u_colorCount.value = 3; uniforms.u_maxBounces.value = 3;
             uniforms.u_rayOrigin.value.set(0, 0.8); uniforms.u_rayDir.value.set(0, -1);
+            uniforms.u_shapeMix.value = 0.0;
             document.querySelectorAll('input').forEach(i => i.value = i.defaultValue);
             ['v-ior','v-bounce','v-rays'].forEach((id,idx)=>(document.getElementById(id).innerText = [1.45,3,3][idx]));
         }
-
-        const setupInput = (id, target) => {
-            document.getElementById(id).addEventListener('input', (e) => {
-                const v = parseFloat(e.target.value); uniforms[target].value = v;
-                document.getElementById('v-'+id.split('-')[0]).innerText = (id==='ior-s' ? v.toFixed(2) : v);
-            });
-        };
 
         window.onload = () => {
             canvas = document.getElementById('gl-canvas');
             const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2.0));
+            renderer.setPixelRatio(window.devicePixelRatio);
 
             uniforms = {
-                u_resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+                u_aspect: { value: window.innerWidth / window.innerHeight },
                 u_rayOrigin: { value: new THREE.Vector2(0, 0.8) },
                 u_rayDir: { value: new THREE.Vector2(0, -1) },
                 u_ior: { value: 1.45 }, u_colorCount: { value: 3 }, u_maxBounces: { value: 3 },
-                u_seed: { value: 42.0 }
+                u_shapeMix: { value: 0.0 }, u_seed: { value: 42.0 }
             };
 
+            const setupInput = (id, target) => {
+                document.getElementById(id).addEventListener('input', (e) => {
+                    const v = parseFloat(e.target.value); uniforms[target].value = v;
+                    document.getElementById('v-'+id.split('-')[0]).innerText = (id==='ior-s' ? v.toFixed(2) : v);
+                });
+            };
             setupInput('ior-s', 'u_ior'); setupInput('bounce-s', 'u_maxBounces'); setupInput('rays-s', 'u_colorCount');
 
-            // 2本指制御
             canvas.addEventListener('touchmove', (e) => {
                 if (e.target.closest('#ui')) return;
                 e.preventDefault();
@@ -88,10 +97,22 @@
                 }
             }, {passive: false});
 
+            const vertexShader = `
+                varying vec2 vUv;
+                uniform float u_aspect;
+                void main() {
+                    vUv = (uv - 0.5) * 2.0;
+                    if(u_aspect > 1.0) vUv.x *= u_aspect;
+                    else vUv.y /= u_aspect;
+                    gl_Position = vec4(position, 1.0);
+                }
+            `;
+
             const fragmentShader = `
                 precision highp float;
-                uniform vec2 u_resolution, u_rayOrigin, u_rayDir;
-                uniform float u_ior, u_colorCount, u_maxBounces, u_seed;
+                varying vec2 vUv;
+                uniform vec2 u_rayOrigin, u_rayDir;
+                uniform float u_ior, u_colorCount, u_maxBounces, u_shapeMix, u_seed;
                 #define EPS 0.002
                 #define BEAM_W 0.001
 
@@ -100,236 +121,21 @@
                     float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
                     return mix(b, a, h) - k * h * (1.0 - h);
                 }
-
-                // JFA-Inspired Static SDF (完全に中央)
-                float map(vec2 p) {
-                    float d = length(p) - 0.22;
-                    // シード点を静的に固定（計算の並列化）
-                    d = smin(d, length(p - vec2(0.3, 0.2)) - 0.1, 0.35);
-                    d = smin(d, length(p - vec2(-0.25, -0.3)) - 0.12, 0.35);
-                    d = smin(d, length(p - vec2(0.15, -0.25)) - 0.08, 0.35);
-                    return d;
-                }
-
-                vec2 getNormal(vec2 p) {
-                    vec2 e = vec2(EPS, 0);
-                    return normalize(vec2(map(p+e.xy)-map(p-e.xy), map(p+e.yx)-map(p-e.yx)));
-                }
-
-                float dfLine(vec2 p, vec2 a, vec2 b) {
-                    vec2 pa = p - a, ba = b - a;
-                    return length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0));
-                }
-
-                vec3 getOzzyColor(int i, float total) {
-                    if(total <= 3.0) {
-                        if(i==0) return vec3(1,0,0); if(i==1) return vec3(0,1,0); return vec3(0,0,1);
-                    }
-                    if(total <= 5.0) {
-                        if(i==0) return vec3(1,0,0); if(i==1) return vec3(1,0.8,0); 
-                        if(i==2) return vec3(0,1,0); if(i==3) return vec3(0,0.8,1); return vec3(0,0,1);
-                    }
-                    if(total <= 7.0) {
-                        if(i==0) return vec3(1,0,0); if(i==1) return vec3(1,0.5,0); if(i==2) return vec3(1,1,0);
-                        if(i==3) return vec3(0,1,0); if(i==4) return vec3(0,0.5,1); if(i==5) return vec3(0,0,1); return vec3(0.5,0,1);
-                    }
-                    float f = float(i)/(total-1.0);
-                    return 0.5 + 0.5 * cos(6.28318 * (vec3(1,1,1) * f + vec3(0.0, 0.33, 0.67)));
-                }
-
-                void main() {
-                    // 真の幾何学的センター
-                    vec2 fragCoord = gl_FragCoord.xy;
-                    vec2 uv = (fragCoord - 0.5 * u_resolution.xy) / min(u_resolution.y, u_resolution.x);
-                    
-                    vec3 col = vec3(0.0);
-                    float d_glass = map(uv);
-                    if(d_glass < 0.0) col += vec3(0.05, 0.1, 0.15); // ガラス内部
-
-                    vec2 rd = normalize(u_rayDir);
-                    vec2 ro = u_rayOrigin;
-
-                    // 1. 入射点
-                    float t = 0.0;
-                    for(int j=0; j<24; j++) {
-                        float d = map(ro + rd * t);
-                        if(d < EPS || t > 3.0) break;
-                        t += d;
-                    }
-
-                    if(t < 3.0) {
-                        vec2 p1 = ro + rd * t;
-                        vec2 n1 = getNormal(p1);
-                        col += vec3(smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, ro, p1)) * 0.3);
-
-                        int count = int(u_colorCount);
-                        for(int i=0; i<12; i++) {
-                            if(i >= count) break;
-                            vec3 waveCol = getOzzyColor(i, u_colorCount);
-                            float curIOR = u_ior + (float(i)/max(1.0, u_colorCount-1.0) - 0.5) * 0.35;
-                            
-                            vec2 rP = p1, rD = refract(rd, n1, 1.0/curIOR);
-                            if(length(rD) < 0.1) rD = reflect(rd, n1);
-
-                            // 2. 内部バウンス
-                            for(int b=0; b < 10; b++) {
-                                if(float(b) >= u_maxBounces) break;
-                                float tE = 0.04;
-                                for(int s=0; s<10; s++) { // Optimized Tracing
-                                    float d = -map(rP + rD * tE);
-                                    if(d < EPS || tE > 2.0) break;
-                                    tE += d;
-                                }
-                                vec2 p2 = rP + rD * tE;
-                                vec2 n2 = getNormal(p2);
-                                col += waveCol * smoothstep(BEAM_W+0.001, BEAM_W, dfLine(uv, rP, p2)) * 0.2;
-                                
-                                vec2 rO = refract(rD, -n2, curIOR);
-                                if(length(rO) < 0.1) { rD = reflect(rD, -n2); rP = p2; }
-                                else { col += waveCol * smoothstep(BEAM_W+0.001, BEAM_W, dfLine(uv, p2, p2 + rO * 3.5)); break; }
-                            }
-                        }
-                    } else { col += vec3(smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, ro, ro + rd * 4.0)) * 0.1); }
-                    gl_FragColor = vec4(col, 1.0);
-                }
-            `;
-
-            const scene = new THREE.Scene();
-            scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({ uniforms, vertexShader: `void main(){gl_Position=vec4(position,1.0);}`, fragmentShader })));
-            const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-            function animate() { renderer.render(scene, camera); requestAnimationFrame(animate); }
-            animate();
-            
-            window.addEventListener('resize', () => {
-                renderer.setSize(window.innerWidth, window.innerHeight);
-                uniforms.u_resolution.value.set(window.innerWidth, window.innerHeight);
-            });
-        };
-    </script>
-</body>
-</html>
-                }
-
-                float map(vec2 p) {
-                    // 1.6倍サイズ (0.25 * 1.6 = 0.4)
-                    float d = length(p) - 0.22;
-                    // 静的な「種」の配置 (JFA Cache Philosphy: 演算の固定化)
-                    for(int i=0; i<4; i++) {
-                        float fi = float(i);
-                        vec2 seed = vec2(hash(vec2(fi, 1.0))-0.5, hash(vec2(fi, 2.0))-0.5) * 0.6;
-                        d = smin(d, length(p - seed) - 0.1, 0.3);
-                    }
-                    return d;
-                }
-
-                vec2 getNormal(vec2 p) {
-                    vec2 e = vec2(EPS, 0);
-                    return normalize(vec2(map(p+e.xy)-map(p-e.xy), map(p+e.yx)-map(p-e.yx)));
-                }
-
-                float dfLine(vec2 p, vec2 a, vec2 b) {
-                    vec2 pa = p - a, ba = b - a;
-                    return length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0));
-                }
-
-                vec3 getSpectralColor(int i, float total) {
-                    if(total <= 3.0) {
-                        if(i==0) return vec3(1,0,0); if(i==1) return vec3(0,1,0); return vec3(0,0,1);
-                    }
-                    float f = float(i)/(total-1.0);
-                    return 0.5 + 0.5 * cos(6.28318 * (vec3(1,1,1) * f + vec3(0.0, 0.33, 0.67)));
-                }
-
-                void main() {
-                    // 完全な中央配置のためのUV計算
-                    vec2 fragCoord = gl_FragCoord.xy;
-                    vec2 uv = (fragCoord - 0.5 * u_resolution.xy) / min(u_resolution.y, u_resolution.x);
-                    
-                    vec3 col = vec3(0.0);
-                    float d_glass = map(uv);
-                    if(d_glass < 0.0) col += vec3(0.04, 0.08, 0.1); // ガラス内部の塗りつぶし
-
-                    vec2 rd = normalize(u_rayDir);
-                    vec2 ro = u_rayOrigin;
-
-                    // 1. 入射点探索 (全色共通で一度のみ)
-                    float t = 0.0;
-                    for(int j=0; j<24; j++) {
-                        float d = map(ro + rd * t);
-                        if(d < EPS || t > 3.0) break;
-                        t += d;
-                    }
-
-                    if(t < 3.0) {
-                        vec2 p1 = ro + rd * t;
-                        vec2 n1 = getNormal(p1);
-                        col += vec3(smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, ro, p1)) * 0.3);
-
-                        int count = int(u_colorCount);
-                        for(int i=0; i<12; i++) {
-                            if(i >= count) break;
-                            vec3 waveCol = getSpectralColor(i, u_colorCount);
-                            float curIOR = u_ior + (float(i)/max(1.0, u_colorCount-1.0) - 0.5) * 0.35;
-                            
-                            vec2 rP = p1, rD = refract(rd, n1, 1.0/curIOR);
-                            if(length(rD) < 0.1) rD = reflect(rd, n1);
-
-                            // 2. 内部反射ループ (Sphere Tracing 最適化)
-                            for(int b=0; b<10; b++) {
-                                if(float(b) >= u_maxBounces) break;
-                                float tE = 0.04;
-                                // 内部は凸形状に近いため、ステップ数を削減
-                                for(int s=0; s<8; s++) { 
-                                    float d = -map(rP + rD * tE);
-                                    if(d < EPS || tE > 2.0) break;
-                                    tE += d;
-                                }
-                                vec2 p2 = rP + rD * tE;
-                                vec2 n2 = getNormal(p2);
-                                col += waveCol * smoothstep(BEAM_W+0.001, BEAM_W, dfLine(uv, rP, p2)) * 0.25;
-                                
-                                vec2 rOut = refract(rD, -n2, curIOR);
-                                if(length(rOut) < 0.1) {
-                                    rD = reflect(rD, -n2); rP = p2;
-                                } else {
-                                    col += waveCol * smoothstep(BEAM_W+0.001, BEAM_W, dfLine(uv, p2, p2 + rOut * 3.0));
-                                    break;
-                                }
-                            }
-                        }
-                    } else {
-                        col += vec3(smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, ro, ro + rd * 4.0)) * 0.1);
-                    }
-                    gl_FragColor = vec4(col, 1.0);
-                }
-            `;
-
-            const scene = new THREE.Scene();
-            const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({ uniforms, vertexShader: `void main(){gl_Position=vec4(position,1.0);}`, fragmentShader }));
-            scene.add(mesh);
-            const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-            function animate() { renderer.render(scene, camera); requestAnimationFrame(animate); }
-            animate();
-            window.addEventListener('resize', () => {
-                renderer.setSize(window.innerWidth, window.innerHeight);
-                uniforms.u_resolution.value.set(window.innerWidth, window.innerHeight);
-            });
-        };
-    </script>
-</body>
-</html>
+                float sdRoundedTriangle(vec2 p, float r, float f) {
+                    const float k = sqrt(3.0);
+                    p.x = abs(p.x) - r; p.y = p.y + r/k;
+                    if( p.x+k*p.y>0.0 ) p = vec2(p.x-k*p.y,-k*p.x-p.y)/2.0;
                     p.x -= clamp( p.x, -2.0*r, 0.0 );
                     return -length(p)*sign(p.y) - f;
                 }
 
-                // Cached JFA-inspired SDF
                 float map(vec2 p) {
-                    float d1 = sdRoundedTriangle(p, 0.4, 0.03); // 完全に中央に 1.6倍サイズ
+                    float d1 = sdRoundedTriangle(p, 0.42, 0.03); 
                     float d2 = length(p) - 0.22;
-                    for(int i=0; i<4; i++) {
+                    for(int i=0; i<3; i++) {
                         float fi = float(i);
-                        vec2 seed = vec2(hash(vec2(fi, u_seed))-0.5, hash(vec2(fi*1.4, u_seed+fi))-0.5) * 0.7;
-                        d2 = smin(d2, length(p - seed) - (0.05 + hash(vec2(fi*1.7))*0.1), 0.35);
+                        vec2 s = vec2(hash(vec2(fi, u_seed))-0.5, hash(vec2(fi+1.3, u_seed))-0.5) * 0.7;
+                        d2 = smin(d2, length(p - s) - 0.1, 0.3);
                     }
                     return mix(d1, d2, u_shapeMix);
                 }
@@ -345,26 +151,34 @@
                 }
 
                 vec3 getOzzyColor(int i, float total) {
-                    if(total <= 3.0) { if(i==0) return vec3(1,0,0); if(i==1) return vec3(0,1,0); return vec3(0,0,1); }
-                    if(total <= 7.0) { if(i==0) return vec3(1,0,0); if(i==1) return vec3(1,0.5,0); if(i==2) return vec3(1,1,0); if(i==3) return vec3(0,1,0); if(i==4) return vec3(0,0.5,1); if(i==5) return vec3(0.3,0,1); return vec3(0.5,0,1); }
-                    float f = float(i)/(total-1.0); return 0.5 + 0.5 * cos(6.28318 * (vec3(1,1,1) * f + vec3(0.0, 0.33, 0.67)));
+                    if(total <= 3.0) {
+                        if(i==0) return vec3(1,0,0); if(i==1) return vec3(0,1,0); return vec3(0,0,1);
+                    }
+                    if(total <= 7.0) {
+                        if(i==0) return vec3(1,0,0); if(i==1) return vec3(1,0.5,0); if(i==2) return vec3(1,1,0);
+                        if(i==3) return vec3(0,1,0); if(i==4) return vec3(0,0.5,1); if(i==5) return vec3(0,0,1); return vec3(0.5,0,1);
+                    }
+                    float f = float(i)/(total-1.0);
+                    return 0.5 + 0.5 * cos(6.28318 * (vec3(1,1,1) * f + vec3(0.0, 0.33, 0.67)));
                 }
 
                 void main() {
-                    // 中心を原点とする堅牢な座標系
-                    vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / min(u_resolution.y, u_resolution.x);
+                    vec2 uv = vUv; // Vertex Shaderで完全補正済みのUV
                     vec3 col = vec3(0.0);
                     float d_glass = map(uv);
-                    if(d_glass < 0.0) col += vec3(0.05, 0.1, 0.12);
+                    if(d_glass < 0.0) col += vec3(0.04, 0.08, 0.12);
 
-                    vec2 rd = normalize(u_rayDir), ro = u_rayOrigin;
+                    vec2 rd = normalize(u_rayDir);
+                    vec2 ro = u_rayOrigin;
+
                     float t = 0.0;
                     for(int j=0; j<24; j++) {
                         float d = map(ro + rd * t);
-                        if(d < EPS || t > 3.5) break;
+                        if(d < EPS || t > 3.0) break;
                         t += d;
                     }
-                    if(t < 3.5) {
+
+                    if(t < 3.0) {
                         vec2 p1 = ro + rd * t, n1 = getNormal(p1);
                         col += vec3(smoothstep(BEAM_W+0.002, BEAM_W, dfLine(uv, ro, p1)) * 0.3);
                         int count = int(u_colorCount);
@@ -377,7 +191,7 @@
                             for(int b=0; b < 10; b++) {
                                 if(float(b) >= u_maxBounces) break;
                                 float tE = 0.05;
-                                for(int s=0; s<10; s++) { // Optimized Parallel Tracing
+                                for(int s=0; s<10; s++) {
                                     float d = -map(rP + rD * tE);
                                     if(d < EPS || tE > 2.0) break;
                                     tE += d;
@@ -395,13 +209,14 @@
             `;
 
             const scene = new THREE.Scene();
-            scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({ uniforms, vertexShader: `void main(){gl_Position=vec4(position,1.0);}`, fragmentShader })));
+            scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({ uniforms, vertexShader, fragmentShader })));
             const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-            function render() { renderer.render(scene, camera); requestAnimationFrame(render); }
-            render();
+            function animate() { renderer.render(scene, camera); requestAnimationFrame(animate); }
+            animate();
+            
             window.addEventListener('resize', () => {
                 renderer.setSize(window.innerWidth, window.innerHeight);
-                uniforms.u_resolution.value.set(window.innerWidth, window.innerHeight);
+                uniforms.u_aspect.value = window.innerWidth / window.innerHeight;
             });
         };
     </script>
